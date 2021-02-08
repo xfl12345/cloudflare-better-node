@@ -11,7 +11,7 @@ from forced_ip_https_adapter import ForcedIPHTTPSAdapter
 
 # 源自：https://blog.csdn.net/qq_42951560/article/details/108785802
 
-__updated__= "2021-02-08 16:56:57"
+__updated__= "2021-02-08 16:58:29"
 
 status_init = 0
 status_ready = 1
