@@ -10,7 +10,7 @@ from forced_ip_https_adapter import ForcedIPHTTPSAdapter
 
 # 源自：https://blog.csdn.net/qq_42951560/article/details/108785802
 
-__updated__= "2021-02-08 10:10:57"
+__updated__= "2021-02-08 15:29:16"
 
 status_init = 0
 status_ready = 1
@@ -108,26 +108,26 @@ class downloader:
         self.url_parse = parse.urlparse(url=url)
         self.hostname = self.url_parse.hostname
         self.is_https = False
-        self.specific_ip_adress = None
+        self.specific_ip_address = None
         self.ip_direct_url = None
         
         if self.url_parse.scheme == "https":
             self.is_https = True
         
-        if "specific_ip_adress" in self.kwargs:
-            self.specific_ip_adress = str(kwargs.pop("specific_ip_adress"))
+        if "specific_ip_address" in self.kwargs:
+            self.specific_ip_address = str(kwargs.pop("specific_ip_address"))
             if not self.is_https:
                 pattern = re.compile(r"http://"+self.hostname)
                 self.ip_direct_url = re.sub(pattern, \
-                    repl="http://"+self.specific_ip_adress ,string=self.url)
+                    repl="http://"+self.specific_ip_address ,string=self.url)
         # 发起URL请求，将response对象存入变量 r
         session = requests.Session()
         if self.is_https:
-            if self.specific_ip_adress == None :
-                session.mount(prefix="https://" , adapter=ForcedIPHTTPSAdapter(max_retries=self.each_retries, 
-                    dest_ip=self.specific_ip_adress))
-            else:
+            if self.specific_ip_address == None :
                 session.mount(prefix="https://", adapter=ForcedIPHTTPSAdapter(max_retries=self.each_retries) )
+            else:
+                session.mount(prefix="https://" , adapter=ForcedIPHTTPSAdapter(max_retries=self.each_retries, 
+                    dest_ip=self.specific_ip_address))
         else:
             session.mount(prefix="http://", adapter=HTTPAdapter(max_retries=self.each_retries) )
         r = session.head( url=self.url, allow_redirects=True, verify=self.SNI_verify)
@@ -159,11 +159,11 @@ class downloader:
         while dp.keep_get_new_request:
             try:
                 if self.is_https:
-                    if self.specific_ip_adress == None :
-                        session.mount(prefix="https://" , adapter=ForcedIPHTTPSAdapter(max_retries=self.each_retries, 
-                            dest_ip=self.specific_ip_adress))
-                    else:
+                    if self.specific_ip_address == None :
                         session.mount(prefix="https://", adapter=ForcedIPHTTPSAdapter(max_retries=self.each_retries) )
+                    else:
+                        session.mount(prefix="https://" , adapter=ForcedIPHTTPSAdapter(max_retries=self.each_retries, 
+                            dest_ip=self.specific_ip_address))
                     my_request = session.get(url=self.url, headers=headers, 
                         stream=self.stream, timeout=self.timeout, verify=self.SNI_verify)
                 else:
@@ -368,9 +368,10 @@ class downloader:
 if __name__ == "__main__":
     # url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
     url = "https://speed.haoren.ml/cache.jpg"
-    # specific_ip_adress = "1.0.0.66"
-    down = downloader(url=url, name="cdn.jpg", \
-        specific_ip_adress="1.0.0.0", thread_num=32 )
+    # specific_ip_address = "1.0.0.66"
+    # url = "https://speed.cloudflare.com/__down?bytes=10000000000"
+    down = downloader(url=url, name="cache.jpg", \
+        specific_ip_address="1.0.0.0", thread_num=32 )
     down.main()
 
 class my_thread_lock:
