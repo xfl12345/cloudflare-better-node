@@ -1,0 +1,6 @@
+config.json
+config.conf
+*.swp
+*.pyc
+.DS_Store
+/no_upload/
