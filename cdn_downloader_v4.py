@@ -11,7 +11,7 @@ from forced_ip_https_adapter import ForcedIPHTTPSAdapter
 
 # 源自：https://blog.csdn.net/qq_42951560/article/details/108785802
 
-__updated__= "2021-02-08 16:54:10"
+__updated__= "2021-02-08 16:56:57"
 
 status_init = 0
 status_ready = 1
@@ -80,7 +80,7 @@ class downloader:
         self.timeout = 3
         self.each_retries = 3
         self.stream = True
-        self.SNI_verify = True
+        self.sni_verify = True
         self.thread_num = 4
         self.sha256_hash_value = None
 
@@ -91,7 +91,7 @@ class downloader:
         if "stream" in kwargs:
             self.stream = bool(kwargs.pop("stream"))
         if "verify" in kwargs:
-            self.SNI_verify = bool(kwargs.pop("verify"))
+            self.sni_verify = bool(kwargs.pop("verify"))
         if "thread_num" in kwargs:
             self.thread_num = int(kwargs.pop("thread_num"))
         if "sha256_hash_value" in kwargs:
@@ -128,7 +128,7 @@ class downloader:
                     dest_ip=self.specific_ip_address))
         else:
             session.mount(prefix="http://", adapter=HTTPAdapter(max_retries=self.each_retries) )
-        r = session.head( url=self.url, allow_redirects=True, verify=self.SNI_verify)
+        r = session.head( url=self.url, allow_redirects=True, verify=self.sni_verify)
         # 从回复数据获取文件大小
         self.size = int(r.headers["Content-Length"])
 
@@ -163,7 +163,7 @@ class downloader:
                         session.mount(prefix="https://" , adapter=ForcedIPHTTPSAdapter(max_retries=self.each_retries, 
                             dest_ip=self.specific_ip_address))
                     my_request = session.get(url=self.url, headers=headers, 
-                        stream=self.stream, timeout=self.timeout, verify=self.SNI_verify)
+                        stream=self.stream, timeout=self.timeout, verify=self.sni_verify)
                 else:
                     session.mount(prefix="http://", adapter=HTTPAdapter(max_retries=self.each_retries) )
                     my_request = session.get(url=self.ip_direct_url, headers=headers, 
