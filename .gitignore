@@ -4,3 +4,4 @@ config.conf
 *.pyc
 .DS_Store
 /no_upload/
+/.vscode/
