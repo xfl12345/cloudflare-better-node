@@ -4,13 +4,14 @@ import time
 import threading
 import re
 from urllib import parse
+import hashlib
 
 from requests.sessions import HTTPAdapter
 from forced_ip_https_adapter import ForcedIPHTTPSAdapter
 
 # 源自：https://blog.csdn.net/qq_42951560/article/details/108785802
 
-__updated__= "2021-02-08 15:29:16"
+__updated__= "2021-02-08 16:54:10"
 
 status_init = 0
 status_ready = 1
@@ -68,25 +69,20 @@ class download_progress:
     def now_force_exit(self):
         self.downloader_thread_status = status_force_exit
 
-# TODO: 初始化任务为一个列表，传递列表给多线程的监视器
-# 监视器功能：如果超过 x 秒没有接收到新的chunk，则重启这个下载任务
-# 监视器有权限杀死download线程，
-# 也有权限向线程池添加“重启”后的download线程
-
 class downloader:
     const_one_of_1024 = 0.0009765625 # 1/1024
     def __init__(self, url:str, name:str, **kwargs):
         self.url = url
-        self.name = name
+        self.name = name        
+        # 看门狗检查线程的频率，每多少秒检查一次
+        self.watchdog_frequent = 5
         # 设置超时时间，超出后立即重试
-        self.each_retries = 3
         self.timeout = 3
+        self.each_retries = 3
         self.stream = True
         self.SNI_verify = True
         self.thread_num = 4
-        
-        # 看门狗检查线程的频率，每多少秒检查一次
-        self.watchdog_frequent = 5
+        self.sha256_hash_value = None
 
         if "max_retries" in kwargs:
             self.each_retries = int(kwargs.pop("max_retries"))
@@ -98,6 +94,8 @@ class downloader:
             self.SNI_verify = bool(kwargs.pop("verify"))
         if "thread_num" in kwargs:
             self.thread_num = int(kwargs.pop("thread_num"))
+        if "sha256_hash_value" in kwargs:
+            self.sha256_hash_value = str(kwargs.pop("sha256_hash_value")).upper()
 
         self.kwargs = kwargs
 
@@ -198,6 +196,7 @@ class downloader:
                 try:
                     chunk_data = next(it)
                     f.write(chunk_data)
+                    # 统计已下载的数据大小，单位是字节（byte）
                     dp.curr_getsize += len(chunk_data)
                 except StopIteration:
                     it.close()
@@ -212,22 +211,20 @@ class downloader:
                         f.seek(dp.curr_start)
                         dp.now_running()
         if(dp.curr_start + dp.curr_getsize <  dp.curr_end):
-        # my_request.close()
             print(f"worker:my_thread_id={dp.my_thread_id}," + \
                 f"start={dp.curr_start} + getsize={dp.curr_getsize} < end={dp.curr_end}," + \
                 "exit abnormally.")
             dp.now_force_exit()
             return None
-        else:
-            end_time = time.time()
-            dp.now_work_finished()
-            tmp_curr_getsize = dp.curr_getsize
-            dp.curr_getsize = 0
-            dp.history_done_size += tmp_curr_getsize
-            # for chunk in my_request.iter_content( *iter_content_param ):
-            #     f.write(chunk)
-            #     # 统计已下载的数据大小，单位是字节（byte）
-            #     self.getsize[my_thread_id] += len(chunk)
+        try:
+            dp.request_context.close()
+        except Exception:
+            pass
+        end_time = time.time()
+        dp.now_work_finished()
+        tmp_curr_getsize = dp.curr_getsize
+        dp.curr_getsize = 0
+        dp.history_done_size += tmp_curr_getsize
         total_time = end_time - start_time
         total_size = dp.history_done_size
         average_speed = self.get_humanize_size(size_in_byte = total_size/total_time )
@@ -319,9 +316,8 @@ class downloader:
                         # dp_list[i] = curr_dp
                         self.futures[i] = future
                     except Exception as e:
-                        print(e)
                         print(f"watchdog:thread_id={curr_dp.my_thread_id},"+\
-                            f"restart failed!{' '*30}")
+                            f"restart failed!Error=",e)
                     else:
                         print(f"watchdog:thread_id={curr_dp.my_thread_id},"+\
                             f"restart succeed!{' '*30}")
@@ -351,8 +347,8 @@ class downloader:
         
         # TODO: 把下载监视器写到多线程任务submit之前，要求用独立线程，自退出
         dms_thread = threading.Thread(target=self.download_monitor_str, daemon=True)
-        dw_thread = threading.Thread(target=self.download_watchdog, daemon=True)
         dms_thread.start()
+        dw_thread = threading.Thread(target=self.download_watchdog, daemon=True)
         dw_thread.start()
         # print("keep running")
         dms_thread.join()
@@ -363,54 +359,29 @@ class downloader:
         total_time = end_time - start_time
         average_speed = self.get_humanize_size(size_in_byte = self.size/total_time )
         print(f"total-time: {total_time:.3f}s | average-speed: {average_speed}/s")
+        if self.sha256_hash_value != None:
+            print("Given sha256 hash value is   :" + self.sha256_hash_value)
+            with open(self.name, "rb") as f:
+                sha256_obj = hashlib.sha256()
+                sha256_obj.update(f.read())
+                hash_value = sha256_obj.hexdigest().upper()
+                print("Compute sha256 hash value is :" + hash_value)
+                if (hash_value == self.sha256_hash_value):
+                    print("Hash matched!")
+                else:
+                    print("Hash not match.Maybe file is broken.")
 
 
 if __name__ == "__main__":
+    sha256_hash_value = "A0D7DD06B54AFBDFB6811718337C6EB857885C489DA6304DAB1344ECC992B3DB"
     # url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
     url = "https://speed.haoren.ml/cache.jpg"
     # specific_ip_address = "1.0.0.66"
     # url = "https://speed.cloudflare.com/__down?bytes=10000000000"
     down = downloader(url=url, name="cache.jpg", \
-        specific_ip_address="1.0.0.0", thread_num=32 )
+        specific_ip_address="1.0.0.0", thread_num=32, 
+        sha256_hash_value = sha256_hash_value )
     down.main()
-
-class my_thread_lock:
-    # wait_time = 0
-    # allow_run = False
-    # is_running = False
-    # wait_time_count = 0
-    is_locked = None
-    lock = None
-
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.is_locked = False
-
-    def lock(self):
-        if( self.is_locked == False and \
-             self.lock.acquire(blocking=True) ):
-            self.is_locked = True
-            return True
-        return False
-
-
-    def trylock(self):
-        if( self.lock.acquire(blocking=False) ):
-            self.is_locked = True
-            return True
-        else:
-            self.is_locked = True
-            return False
-
-    def unlock(self):
-        try:
-            self.lock.release()
-            self.is_locked = False
-            return True
-        except RuntimeError:
-            return False
-
-
     
 
     
