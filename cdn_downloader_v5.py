@@ -15,7 +15,7 @@ from forced_ip_https_adapter import ForcedIPHTTPSAdapter
 
 # 源自：https://blog.csdn.net/qq_42951560/article/details/108785802
 
-__updated__= "2021-02-12 22:35:19"
+__updated__= "2021-02-12 22:55:45"
 
 status_init = 0
 status_ready = 1
@@ -90,7 +90,7 @@ class download_progress:
 
 class downloader:
     const_one_of_1024 = 0.0009765625 # 1/1024
-    user_agent = "python 3.8.5/requests 2.24.0 (github.com@xfl12345;cloudflare-better-node v0.4)"
+    user_agent = "python 3.8.5/requests 2.24.0 (github.com@xfl12345;cloudflare-better-node v0.5)"
     default_filename = "url_did_not_provide_filename"
     def __init__(self, 
             url:str, 
@@ -121,6 +121,8 @@ class downloader:
 
         if (sha256_hash_value != None):
             self.sha256_hash_value = sha256_hash_value.upper()
+        if not os.path.exists(self.storage_root):
+            os.makedirs(self.storage_root)
 
         self.kwargs = kwargs
 
@@ -398,9 +400,7 @@ class downloader:
                         print(f"watchdog:thread_id={curr_dp.my_thread_id},"+\
                             f"restart succeed!{' '*30}")
 
-    def main(self):
-        if not os.path.exists(self.storage_root):
-            os.makedirs(self.storage_root)
+    def main(self)->bool:
         # print("Download mission overview:")
         # print()
         session = self.get_session_obj()
@@ -446,7 +446,7 @@ class downloader:
                 end = self.size -1
             else:
                 end = (i+1) * part_size -1
-            dp = download_progress(start=start, end=end, my_thread_id=i, chunk_size=32 )
+            dp = download_progress(start=start, end=end, my_thread_id=i, chunk_size=256 )
             self.download_progress_list.append(dp)
             future = self.download_tp.submit(self.download, dp=dp)
             # future = tp.submit(self.download, start, end, my_thread_id=i )
@@ -485,6 +485,7 @@ class downloader:
                 print("Hash not match.Maybe file is broken.")
         else:
             print("Compute sha256 hash value is :" + compute_sha256_hash())
+        return True
 
 if __name__ == "__main__":
     thread_num = 8
