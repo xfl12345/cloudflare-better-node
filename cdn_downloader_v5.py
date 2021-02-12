@@ -15,7 +15,43 @@ from forced_ip_https_adapter import ForcedIPHTTPSAdapter
 
 # 源自：https://blog.csdn.net/qq_42951560/article/details/108785802
 
-__updated__= "2021-02-12 22:58:14"
+__updated__= "2021-02-12 23:43:43"
+
+class my_thread_lock:
+    # wait_time = 0
+    # allow_run = False
+    # is_running = False
+    # wait_time_count = 0
+    is_locked = None
+    lock = None
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.is_locked = False
+
+    def lock(self):
+        if( self.is_locked == False and \
+             self.lock.acquire(blocking=True) ):
+            self.is_locked = True
+            return True
+        return False
+
+
+    def trylock(self):
+        if( self.lock.acquire(blocking=False) ):
+            self.is_locked = True
+            return True
+        else:
+            self.is_locked = True
+            return False
+
+    def unlock(self):
+        try:
+            self.lock.release()
+            self.is_locked = False
+            return True
+        except RuntimeError:
+            return False
 
 status_init = 0
 status_ready = 1
@@ -145,7 +181,7 @@ class downloader:
                 repl="http://"+self.specific_ip_address ,string=self.url)
 
     #source code URL:https://blog.csdn.net/mbh12333/article/details/103721834
-    def get_file_name(self,url:str, response:Response):
+    def get_file_name(self,url:str, response:Response)->str:
         filename = ''
         headers = response.headers
         if 'Content-Disposition' in headers and headers['Content-Disposition']:
@@ -158,7 +194,7 @@ class downloader:
         if not filename and os.path.basename(url):
             filename = os.path.basename(url).split("?")[0]
         if not filename:
-            return time.time()
+            return str(time.time())
         return filename
 
     def chunk_download_retry(self,dp:download_progress):
@@ -400,34 +436,37 @@ class downloader:
                         print(f"watchdog:thread_id={curr_dp.my_thread_id},"+\
                             f"restart succeed!{' '*30}")
 
-    def main(self)->bool:
-        # print("Download mission overview:")
-        # print()
+    def get_response_with_content_length(self):
         session = self.get_session_obj()
         # 发起URL请求，将response对象存入变量 r
         r = session.head( url=self.url, allow_redirects=True, verify=self.sni_verify)
-        request_get_size_succeed_flag = False
-        # 从回复数据获取文件大小
-        if r.status_code == 200:
-            self.size = int(r.headers["Content-Length"])
-            request_get_size_succeed_flag = True
+        headers = r.headers
+        def content_length_exist():
+            return (r.status_code == 200 and ("Content-Length" in headers) and headers["Content-Length"])
+        if content_length_exist():
+            return r
         elif self.stream: # 如果服务器不允许通过head请求探测资源大小
-            session.close()
-            session = self.get_session_obj()
+            r.close()
             r = session.get(url=self.url, allow_redirects=True, verify=self.sni_verify, stream=True)
             it = r.iter_content(chunk_size=8)
-            if r.status_code == 200:
-                self.size = int(r.headers["Content-Length"])
-                request_get_size_succeed_flag = True
-        if request_get_size_succeed_flag:
-            if (self.default_filename == self.filename or \
-                self.filename == None or self.filename == ""):
-                self.filename = self.get_file_name(url=self.url, response=r)
-            r.close()
-        else:
-            r.close()
+            if content_length_exist():
+                return r
+        return None
+
+    def main(self)->bool:
+        # print("Download mission overview:")
+        # print()
+        r = self.get_response_with_content_length()
+        if r == None:
             print("File size request failed.Download canceled!")
             return False
+        # 从回复数据获取文件大小
+        self.size = int(r.headers["Content-Length"])
+        # 初始化文件名，确保不空着
+        if (self.default_filename == self.filename or \
+            self.filename == None or self.filename == ""):
+            self.filename = self.get_file_name(url=self.url, response=r)
+        r.close()
         self.full_path_to_file = self.storage_root + self.filename
         print("Download file name=\"{}\"".format(self.filename))
         print("Download file size={}".format(self.get_humanize_size(self.size)))
