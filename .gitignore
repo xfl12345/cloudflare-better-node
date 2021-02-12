@@ -5,3 +5,4 @@ config.conf
 .DS_Store
 /no_upload/
 /.vscode/
+/downloads/
