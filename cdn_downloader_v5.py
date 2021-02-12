@@ -15,7 +15,7 @@ from forced_ip_https_adapter import ForcedIPHTTPSAdapter
 
 # 源自：https://blog.csdn.net/qq_42951560/article/details/108785802
 
-__updated__= "2021-02-12 22:55:45"
+__updated__= "2021-02-12 22:58:14"
 
 status_init = 0
 status_ready = 1
@@ -226,7 +226,7 @@ class downloader:
         dp.request_context = my_request
         dp.now_ready()
 
-    # 默认每次拉取 10KiB 大小的数据块
+    # 下载文件的核心函数
     def download(self, dp:download_progress):
         dp.request_context = self.get_new_request(dp=dp, need_return=True)
         dp.now_ready()
