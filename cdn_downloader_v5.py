@@ -1,5 +1,6 @@
 import io
 import os
+import sys
 import time
 import threading
 import requests
@@ -15,7 +16,8 @@ from requests.sessions import HTTPAdapter
 from forced_ip_https_adapter import ForcedIPHTTPSAdapter
 
 # 最后一次代码修改时间
-__updated__= "2021-02-18 11:39:19"
+__updated__= "2021-02-18 12:21:52"
+__version__=0.5
 
 # download 线程状态常量
 status_init = 0
@@ -168,7 +170,6 @@ class download_progress:
 # source code URL: https://blog.csdn.net/qq_42951560/article/details/108785802
 class downloader:
     const_one_of_1024:float = 0.0009765625 # 1/1024
-    user_agent = "python 3.8.5/requests 2.24.0 (github.com@xfl12345;cloudflare-better-node v0.5)"
     default_filename:str = "url_did_not_provide_filename"
     def __init__(self, 
             url:str, 
@@ -183,6 +184,10 @@ class downloader:
             specific_ip_address:str=None,
             use_watchdog:bool=True,
             **kwargs):
+        self.user_agent = "Python/" + \
+            str(sys.version).split(" ")[0] + " " +\
+            "python_requests/" + str(requests.__version__) + " " +\
+            f"cloudflare-better-node/{__version__} (github.com@xfl12345) "
         self.url:str = url
         self.filename:str = filename 
         self.storage_root:str = storage_root
@@ -317,8 +322,11 @@ class downloader:
     # 下载文件的核心函数
     def download(self, dp:download_progress):
         self.get_new_request(dp=dp)
+        is_enforce_mode:bool = True
+        if dp.getsize_strict_level != level_enforce:
+            is_enforce_mode = False
         def is_not_finished()->bool:
-            if dp.getsize_strict_level == level_enforce:
+            if is_enforce_mode:
                 return (dp.curr_start + dp.curr_getsize -1 != dp.curr_end)
             else:
                 return (dp.curr_start + dp.curr_getsize -1 <  dp.curr_end )
@@ -336,7 +344,7 @@ class downloader:
                     # if dp.curr_getsize > 30000 and dp.curr_getsize < 40000:
                     #     break
 
-                    if (curr_position + chunk_data_len > dp.curr_end):
+                    if is_enforce_mode and (curr_position + chunk_data_len > dp.curr_end):
                         aim_len = dp.curr_end - curr_position
                         buffer = io.BytesIO(chunk_data)
                         chunk_data = buffer.read(aim_len)
@@ -620,7 +628,7 @@ class downloader:
 
     def main(self)->bool:
         # print("Download mission overview:")
-        # print()
+        print("user_agent="+self.user_agent)
         r = self.get_response_with_content_length()
         if r == None:
             print("File size request failed.Download canceled!")
