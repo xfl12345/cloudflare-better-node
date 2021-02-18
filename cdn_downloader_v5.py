@@ -16,8 +16,8 @@ from requests.sessions import HTTPAdapter
 from forced_ip_https_adapter import ForcedIPHTTPSAdapter
 
 # 最后一次代码修改时间
-__updated__= "2021-02-18 12:21:52"
-__version__=0.5
+__updated__ = "2021-02-18 22:01:22"
+__version__ = 0.5
 
 # download 线程状态常量
 status_init = 0
@@ -184,8 +184,12 @@ class downloader:
             specific_ip_address:str=None,
             use_watchdog:bool=True,
             **kwargs):
-        self.user_agent = "Python/" + \
-            str(sys.version).split(" ")[0] + " " +\
+        my_python_version = str(sys.version_info.major) + "." +\
+                    str(sys.version_info.minor) + "." +\
+                    str(sys.version_info.micro) # + "_" +\
+                    # str(sys.version_info.releaselevel) + "_" +\
+                    # str(sys.version_info.serial)
+        self.user_agent = "Python/" + my_python_version + " " +\
             "python_requests/" + str(requests.__version__) + " " +\
             f"cloudflare-better-node/{__version__} (github.com@xfl12345) "
         self.url:str = url
