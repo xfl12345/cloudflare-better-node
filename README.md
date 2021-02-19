@@ -12,10 +12,11 @@
 
 ## TODO  
 
-+ 多进程  
-+ 循环遍历网段  
-+ MySQL数据库联动  
-+ 全自动DDNS  
++ [x] 下载器  
++ [ ] 多进程  
++ [ ] 循环遍历网段  
++ [ ] MySQL数据库联动  
++ [ ] 全自动DDNS  
 
 ## 进度
 
@@ -41,3 +42,13 @@
 
 + CDN 节点暴力测速器(cdn_speedtest_v1.py)  
   Haven't started yet...
+
+## 计划
+
+Done is better than perfact.  
+完成好过完美。  
+是时候放弃“完美主义”  
+敏捷开发告诉我们，迭代开发，虽然改动成本很高，  
+但是它快且解渴啊！  
+所以打算优先实现speedtest功能，回头再去开发downloader这个核心功能。  
+因此downloader暂时告一段落了。。  
