@@ -16,7 +16,7 @@ from requests.sessions import HTTPAdapter
 from forced_ip_https_adapter import ForcedIPHTTPSAdapter
 
 # 最后一次代码修改时间
-__updated__ = "2021-02-19 16:23:45"
+__updated__ = "2021-02-19 23:44:39"
 __version__ = 0.5
 
 # download 线程状态常量
@@ -172,6 +172,9 @@ class download_progress:
 class downloader:
     const_one_of_1024:float = 0.0009765625 # 1/1024
     default_filename:str = "url_did_not_provide_filename"
+    """
+    specific_range 要求传入的是一个长度为 2 的Tuple元组，包含(start_from, end_at)两个参数
+    """
     def __init__(self, 
             url:str, 
             filename:str="url_did_not_provide_filename", 
@@ -184,6 +187,7 @@ class downloader:
             sha256_hash_value:str=None,
             specific_ip_address:str=None,
             use_watchdog:bool=True,
+            specific_range:tuple=None,
             **kwargs):
         my_python_version = str(sys.version_info.major) + "." +\
                     str(sys.version_info.minor) + "." +\
@@ -210,6 +214,7 @@ class downloader:
         self.sha256_hash_value = None
         self.specific_ip_address = specific_ip_address
         self.use_watchdog:bool = use_watchdog
+        self.specific_range:tuple = specific_range
         self.kwargs = kwargs
 
         self.download_tp = None
@@ -434,7 +439,7 @@ class downloader:
             yield dp.history_done_size
 
     def is_download_finished(self)->bool:
-        return (sum( self.dp_list_truesize() ) == self.size)
+        return (sum( self.dp_list_truesize() ) == self.total_workload)
 
     def keep_run_until_download_finished(self, func, delay):
         while (not self.download_finished):
@@ -451,7 +456,7 @@ class downloader:
             time.sleep(1)
             curr = sum( self.dp_list_getsize() )
             complete_size = curr
-            process = complete_size / self.size * 100
+            process = complete_size / self.total_workload * 100
             complete_size_str = self.get_humanize_size(size_in_byte = complete_size )
             speed = self.get_humanize_size(size_in_byte = (curr-last))
             print(f"downloaded: {complete_size_str:10} | process: {process:6.2f}% | speed: {speed}/s {' '*5}", end="\r")
@@ -630,15 +635,37 @@ class downloader:
                 return r
         return None
 
-    def main(self)->bool:
-        # print("Download mission overview:")
+    def download_range_init(self, origin_size:int)->bool:
+        self.origin_size = origin_size
+        if self.specific_range == None:
+            self.specific_range=(0, self.origin_size)
+            self.total_workload = self.origin_size
+            return True
+        if type(self.specific_range) is tuple and \
+            len(self.specific_range) == 2 and \
+            type(self.specific_range[0]) is int and \
+            type(self.specific_range[1]) is int :
+                start = self.specific_range[0]
+                end = self.specific_range[1]
+                if start <= end and \
+                    start < origin_size and \
+                    end <= origin_size:
+                    self.total_workload = end - start
+                    return True
+        print("specific_range parameter is illegal!")
+        return False
+
+    def download_init(self)->bool:
+        print("Download URL="+self.url)
         print("user_agent="+self.user_agent)
+        # 从回复数据获取文件大小
         r = self.get_response_with_content_length()
         if r == None:
             print("File size request failed.Download canceled!")
             return False
-        # 从回复数据获取文件大小
-        self.size = int(r.headers["Content-Length"])
+        origin_size = int(r.headers["Content-Length"])
+        if not self.download_range_init(origin_size=origin_size):
+            return False
         # 初始化文件名，确保不空着
         if (self.default_filename == self.filename or \
             self.filename == None or self.filename == ""):
@@ -646,24 +673,32 @@ class downloader:
         r.close()
         self.full_path_to_file = self.storage_root + self.filename
         print("Download file path=\"{}\"".format(self.full_path_to_file))
-        print("Download file size={}".format(self.get_humanize_size(self.size)))
+        print("Download file origin size={}".format(self.get_humanize_size(self.origin_size)))
+        print("Download file size={}".format(self.get_humanize_size(self.total_workload)))
         print("File space allocating...")
         start_time = time.time()
         # 优先创建 size 大小的占位文件
         f = open(self.full_path_to_file, "wb")
-        f.truncate(self.size)
+        f.truncate(self.total_workload)
         f.close()
         took_time = "%.3f"%(time.time()-start_time)
-        print("File space allocated.Took {} seconds.".format(took_time),
-            "Starting download...")
+        print("File space allocated.Took {} seconds.".format(took_time) )
+        return True
+
+    def main(self)->bool:
+        # print("Download mission overview:")
+        if not self.download_init():
+            return False
+        print("Starting download...")
 
         self.download_tp = ThreadPoolExecutor(max_workers=self.thread_num)
-        start = 0
-        part_size = int(self.size / self.thread_num)
+        start = self.specific_range[0]
+        total_workload = self.specific_range[1] - self.specific_range[0]
+        part_size = int(total_workload / self.thread_num)
         start_time = time.time()
         for i in range(self.thread_num):
             if(i+1 == self.thread_num):
-                end = self.size -1
+                end = self.specific_range[1] -1
             else:
                 end = (i+1) * part_size -1
             dp = download_progress(start=start, end=end, my_thread_id=i, chunk_size=256 )
@@ -688,7 +723,7 @@ class downloader:
         self.download_tp.shutdown()
         
         total_time = end_time - start_time
-        average_speed = self.get_humanize_size(size_in_byte = self.size/total_time )
+        average_speed = self.get_humanize_size(size_in_byte = self.total_workload/total_time )
         print(f"total-time: {total_time:.3f}s | average-speed: {average_speed}/s")
         def compute_sha256_hash():
             with open(self.full_path_to_file, "rb") as f:
@@ -713,10 +748,13 @@ if __name__ == "__main__":
     specific_ip_address = "1.0.0.66"
     # specific_ip_address = "1.0.0.100"
     # specific_ip_address = None
+    sha256_hash_value = None
     # url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
     # sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
     url = "https://speed.haoren.ml/cache.jpg"
-    sha256_hash_value = "A0D7DD06B54AFBDFB6811718337C6EB857885C489DA6304DAB1344ECC992B3DB"
+    # sha256_hash_value = "A0D7DD06B54AFBDFB6811718337C6EB857885C489DA6304DAB1344ECC992B3DB"
+    # 128 MiB version
+    sha256_hash_value = "45A3AE1D8321E9C99A5AEEA31A2993CF1E384661326C3D238FFAFA2D7451AEDB"
     # url = "https://speed.cloudflare.com/__down?bytes=90"
     # sha256_hash_value = None
     # url = "http://127.0.0.1/download/text/123.txt"
@@ -725,7 +763,8 @@ if __name__ == "__main__":
         url=url, 
         specific_ip_address=specific_ip_address, 
         thread_num=thread_num,
-        sha256_hash_value=sha256_hash_value )
+        sha256_hash_value=sha256_hash_value,
+        specific_range=(0,134217728) )
     down.main()
     
 
