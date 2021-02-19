@@ -16,7 +16,7 @@ from requests.sessions import HTTPAdapter
 from forced_ip_https_adapter import ForcedIPHTTPSAdapter
 
 # 最后一次代码修改时间
-__updated__ = "2021-02-18 22:01:22"
+__updated__ = "2021-02-19 16:23:45"
 __version__ = 0.5
 
 # download 线程状态常量
@@ -127,6 +127,7 @@ class download_progress:
         self.history_done_size = 0
         # 这个worker目前的工作状态
         self.downloader_thread_status = status_init
+        self.my_future = None
 
     def duration_count_up(self):
         self.duration += time.time() - self.start_time
@@ -213,7 +214,6 @@ class downloader:
 
         self.download_tp = None
         self.download_progress_list:typing.List = []
-        self.futures:typing.List = []
         self.status_running_queue:queue.Queue = queue.Queue()
         self.status_exit_queue:queue.Queue = queue.Queue()
         self.status_force_exit_queue:queue.Queue = queue.Queue()
@@ -505,7 +505,7 @@ class downloader:
                 f"total_work_load={self.get_humanize_size(dp.get_curr_workload())}.")
             try:
                 future = self.download_tp.submit(self.download, dp=dp )
-                self.futures.append(future)
+                dp.my_future = future
             except Exception as e:
                 print(f"schedule:thread_id={dp.my_thread_id},"+\
                     f"resubmit failed!Error=",e)
@@ -671,7 +671,7 @@ class downloader:
             future = self.download_tp.submit(self.download, dp=dp)
             print(f"Submit a worker,my_thread_id={i},start_from={start},end_at={end},"+\
                 f"total_work_load={self.get_humanize_size(dp.get_curr_workload())}")
-            self.futures.append(future)
+            dp.my_future = future
             start = end +1
         
         self.schedule_main()
@@ -713,10 +713,10 @@ if __name__ == "__main__":
     specific_ip_address = "1.0.0.66"
     # specific_ip_address = "1.0.0.100"
     # specific_ip_address = None
-    url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
-    sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
-    # url = "https://speed.haoren.ml/cache.jpg"
-    # sha256_hash_value = "A0D7DD06B54AFBDFB6811718337C6EB857885C489DA6304DAB1344ECC992B3DB"
+    # url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
+    # sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
+    url = "https://speed.haoren.ml/cache.jpg"
+    sha256_hash_value = "A0D7DD06B54AFBDFB6811718337C6EB857885C489DA6304DAB1344ECC992B3DB"
     # url = "https://speed.cloudflare.com/__down?bytes=90"
     # sha256_hash_value = None
     # url = "http://127.0.0.1/download/text/123.txt"
