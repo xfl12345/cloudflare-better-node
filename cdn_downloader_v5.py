@@ -16,7 +16,7 @@ from requests.sessions import HTTPAdapter
 from forced_ip_https_adapter import ForcedIPHTTPSAdapter
 
 # 最后一次代码修改时间
-__updated__ = "2021-02-19 23:44:39"
+__updated__ = "2021-02-21 13:03:40"
 __version__ = 0.5
 
 # download 线程状态常量
@@ -167,6 +167,8 @@ class download_progress:
         self.duration_count_up()
         self.downloader_thread_status = status_force_exit
 
+class speedtest_info:
+    pass
 
 # source code URL: https://blog.csdn.net/qq_42951560/article/details/108785802
 class downloader:
@@ -215,10 +217,15 @@ class downloader:
         self.specific_ip_address = specific_ip_address
         self.use_watchdog:bool = use_watchdog
         self.specific_range:tuple = specific_range
+        self.allow_print:bool = True
+
+        if "allow_print" in kwargs:
+            self.allow_print = bool(kwargs.pop("allow_print"))
+
         self.kwargs = kwargs
 
         self.download_tp = None
-        self.download_progress_list:typing.List = []
+        self.download_progress_list:list = []
         self.status_running_queue:queue.Queue = queue.Queue()
         self.status_exit_queue:queue.Queue = queue.Queue()
         self.status_force_exit_queue:queue.Queue = queue.Queue()
@@ -245,6 +252,10 @@ class downloader:
             pattern = re.compile(r"http://"+self.hostname)
             self.ip_direct_url = re.sub(pattern, \
                 repl="http://"+self.specific_ip_address ,string=self.url)
+
+    def diy_output(self,output_str:str=None, **kwargs):
+        if self.allow_print:
+            print(output_str, **kwargs)
 
     #source code URL:https://blog.csdn.net/mbh12333/article/details/103721834
     def get_file_name(self,url:str, response:Response)->str:
@@ -310,13 +321,13 @@ class downloader:
             except (requests.Timeout, requests.ReadTimeout ) :
                 session.close()
                 retry_count = retry_count +1
-                print(f"request:my_thread_id={dp.my_thread_id}," + \
+                self.diy_output(f"request:my_thread_id={dp.my_thread_id}," + \
                     f"request time out.Retry count={retry_count * self.max_retries}")
                 session = self.get_session_obj()
             except Exception as e:
                 session.close()
                 retry_count = retry_count +1
-                print(f"request:my_thread_id={dp.my_thread_id}," + \
+                self.diy_output(f"request:my_thread_id={dp.my_thread_id}," + \
                     "unknow error.Retrying...error=",e)
                 session = self.get_session_obj()
             else:
@@ -357,7 +368,7 @@ class downloader:
                         aim_len = dp.curr_end - curr_position
                         buffer = io.BytesIO(chunk_data)
                         chunk_data = buffer.read(aim_len)
-                        print(f"worker:my_thread_id={dp.my_thread_id},"+\
+                        self.diy_output(f"worker:my_thread_id={dp.my_thread_id},"+\
                             f"chunk_size=\"{dp.chunk_size}\" is too huge."+\
                             f"curr_position={curr_position},"+\
                             f"chunk_data_len={chunk_data_len},"+\
@@ -376,21 +387,21 @@ class downloader:
                     dp.it.close()
                     break
                 except requests.ConnectionError as e:
-                    print(f"worker:my_thread_id={dp.my_thread_id},known error=",e)
+                    self.diy_output(f"worker:my_thread_id={dp.my_thread_id},known error=",e)
                     if( is_not_finished() ):
                         dp.now_init()
                         dp.duration_count_up()
-                        print(f"worker:my_thread_id={dp.my_thread_id},"+\
+                        self.diy_output(f"worker:my_thread_id={dp.my_thread_id},"+\
                             "did not finish yet.Retrying...")
                         self.chunk_download_retry_init(dp=dp)
                         self.get_new_request(dp=dp)
                         f.seek(dp.curr_start)
                         dp.now_running()
                 except Exception as e:
-                    print(f"worker:my_thread_id={dp.my_thread_id},unknow error=",e)
+                    self.diy_output(f"worker:my_thread_id={dp.my_thread_id},unknow error=",e)
                     break
         if( is_not_finished() ):
-            print(f"worker:my_thread_id={dp.my_thread_id}," + \
+            self.diy_output(f"worker:my_thread_id={dp.my_thread_id}," + \
                 f"start={dp.curr_start} + getsize={dp.curr_getsize} -1 != end={dp.curr_end}," + \
                 "exit abnormally.")
             dp.now_force_exit()
@@ -402,7 +413,7 @@ class downloader:
         total_time = dp.duration
         total_size = dp.history_done_size
         average_speed = self.get_humanize_size(size_in_byte = total_size/total_time )
-        print(f"worker:my_thread_id={dp.my_thread_id},my job had done." +\
+        self.diy_output(f"worker:my_thread_id={dp.my_thread_id},my job had done." +\
              f"Total downloaded:{self.get_humanize_size(total_size)}," +\
              f"total_time={(total_time):.3f}s,"+ \
              f"average_speed: {average_speed}/s,"+ \
@@ -459,10 +470,10 @@ class downloader:
             process = complete_size / self.total_workload * 100
             complete_size_str = self.get_humanize_size(size_in_byte = complete_size )
             speed = self.get_humanize_size(size_in_byte = (curr-last))
-            print(f"downloaded: {complete_size_str:10} | process: {process:6.2f}% | speed: {speed}/s {' '*5}", end="\r")
+            self.diy_output(f"downloaded: {complete_size_str:10} | process: {process:6.2f}% | speed: {speed}/s {' '*5}", end="\r")
             if self.download_finished:
                 complete_size_str = self.get_humanize_size(size_in_byte = complete_size )
-                print(f"downloaded: {complete_size_str:10} | process: {100.00:6}% | speed:  0Byte/s ", end=" | ")
+                self.diy_output(f"downloaded: {complete_size_str:10} | process: {100.00:6}% | speed:  0Byte/s ", end=" | ")
                 break
         
     def schedule_dp_deliver(self, dp:download_progress):
@@ -503,7 +514,7 @@ class downloader:
                 continue
             dp.now_init()
             self.chunk_download_retry_init(dp=dp)
-            print("schedule:Resubmit a worker,"+\
+            self.diy_output("schedule:Resubmit a worker,"+\
                 f"my_thread_id={dp.my_thread_id},"+\
                 f"start_from={dp.curr_start}," + \
                 f"end_at={dp.curr_end},"+\
@@ -512,10 +523,10 @@ class downloader:
                 future = self.download_tp.submit(self.download, dp=dp )
                 dp.my_future = future
             except Exception as e:
-                print(f"schedule:thread_id={dp.my_thread_id},"+\
+                self.diy_output(f"schedule:thread_id={dp.my_thread_id},"+\
                     f"resubmit failed!Error=",e)
             else:
-                print(f"schedule:thread_id={dp.my_thread_id},"+\
+                self.diy_output(f"schedule:thread_id={dp.my_thread_id},"+\
                     f"resubmit succeed!{' '*30}")
             my_queue.put(dp)
 
@@ -582,12 +593,9 @@ class downloader:
         ss_force_exit.start()
         ss_pause.start()
         ss_other.start()
-        
-        
-
 
     def download_watchdog(self):
-        print("download_watchdog is running...")
+        self.diy_output("download_watchdog is running...")
         my_queue = self.status_running_queue
         while( not self.download_finished ):
             time.sleep(self.watchdog_frequent)
@@ -602,12 +610,12 @@ class downloader:
                     dp.history_getsize = dp.curr_getsize
                     continue
                 if dp.keep_run :
-                    print(f"watchdog:thread_id={dp.my_thread_id},"+\
+                    self.diy_output(f"watchdog:thread_id={dp.my_thread_id},"+\
                         f"had blocked over {self.watchdog_frequent} seconds!"+\
                         f"retry_count={dp.retry_count},Restarting...")
                     dp.keep_run = False
                 else:
-                    print(f"watchdog:thread_id={dp.my_thread_id},"+\
+                    self.diy_output(f"watchdog:thread_id={dp.my_thread_id},"+\
                         f"failed to terminate!Retrying...{' '*30}")
                 try:
                     dp.request_context.raw._fp.close()
@@ -616,7 +624,7 @@ class downloader:
                     pass
                 my_queue.put(dp)
             self.running_queue_lock.unlock()
-        print("download_watchdog exited.")
+        self.diy_output("download_watchdog exited.")
 
     def get_response_with_content_length(self):
         session = self.get_session_obj()
@@ -652,16 +660,16 @@ class downloader:
                     end <= origin_size:
                     self.total_workload = end - start
                     return True
-        print("specific_range parameter is illegal!")
+        self.diy_output("specific_range parameter is illegal!")
         return False
 
     def download_init(self)->bool:
-        print("Download URL="+self.url)
-        print("user_agent="+self.user_agent)
+        self.diy_output("Download URL="+self.url)
+        self.diy_output("user_agent="+self.user_agent)
         # 从回复数据获取文件大小
         r = self.get_response_with_content_length()
         if r == None:
-            print("File size request failed.Download canceled!")
+            self.diy_output("File size request failed.Download canceled!")
             return False
         origin_size = int(r.headers["Content-Length"])
         if not self.download_range_init(origin_size=origin_size):
@@ -672,24 +680,32 @@ class downloader:
             self.filename = self.get_file_name(url=self.url, response=r)
         r.close()
         self.full_path_to_file = self.storage_root + self.filename
-        print("Download file path=\"{}\"".format(self.full_path_to_file))
-        print("Download file origin size={}".format(self.get_humanize_size(self.origin_size)))
-        print("Download file size={}".format(self.get_humanize_size(self.total_workload)))
-        print("File space allocating...")
+        self.diy_output("Download file path=\"{}\"".format(self.full_path_to_file))
+        self.diy_output("Download file origin size={}".format(self.get_humanize_size(self.origin_size)))
+        self.diy_output("Download file size={}".format(self.get_humanize_size(self.total_workload)))
+        self.diy_output("File space allocating...")
         start_time = time.time()
         # 优先创建 size 大小的占位文件
         f = open(self.full_path_to_file, "wb")
         f.truncate(self.total_workload)
         f.close()
         took_time = "%.3f"%(time.time()-start_time)
-        print("File space allocated.Took {} seconds.".format(took_time) )
+        self.diy_output("File space allocated.Took {} seconds.".format(took_time) )
         return True
 
+
+    def compute_sha256_hash(self)->str:
+        with open(self.full_path_to_file, "rb") as f:
+            sha256_obj = hashlib.sha256()
+            sha256_obj.update(f.read())
+            hash_value = sha256_obj.hexdigest().upper()
+            return hash_value
+
     def main(self)->bool:
-        # print("Download mission overview:")
+        # self.diy_output("Download mission overview:")
         if not self.download_init():
             return False
-        print("Starting download...")
+        self.diy_output("Starting download...")
 
         self.download_tp = ThreadPoolExecutor(max_workers=self.thread_num)
         start = self.specific_range[0]
@@ -704,7 +720,7 @@ class downloader:
             dp = download_progress(start=start, end=end, my_thread_id=i, chunk_size=256 )
             self.download_progress_list.append(dp)
             future = self.download_tp.submit(self.download, dp=dp)
-            print(f"Submit a worker,my_thread_id={i},start_from={start},end_at={end},"+\
+            self.diy_output(f"Submit a worker,my_thread_id={i},start_from={start},end_at={end},"+\
                 f"total_work_load={self.get_humanize_size(dp.get_curr_workload())}")
             dp.my_future = future
             start = end +1
@@ -716,7 +732,7 @@ class downloader:
         if(self.use_watchdog):
             dw_thread = threading.Thread(target=self.download_watchdog, daemon=True)
             dw_thread.start()
-        # print("keep running")
+        # self.diy_output("keep running")
         dms_thread.join()
         # self.download_monitor_str()
         end_time = time.time()
@@ -724,24 +740,100 @@ class downloader:
         
         total_time = end_time - start_time
         average_speed = self.get_humanize_size(size_in_byte = self.total_workload/total_time )
-        print(f"total-time: {total_time:.3f}s | average-speed: {average_speed}/s")
-        def compute_sha256_hash():
-            with open(self.full_path_to_file, "rb") as f:
-                sha256_obj = hashlib.sha256()
-                sha256_obj.update(f.read())
-                hash_value = sha256_obj.hexdigest().upper()
-                return hash_value
+        self.diy_output(f"total-time: {total_time:.3f}s | average-speed: {average_speed}/s")
+
         if self.sha256_hash_value != None:
-            print("Given sha256 hash value is   :" + self.sha256_hash_value)
-            hash_value = compute_sha256_hash()
-            print("Compute sha256 hash value is :" + hash_value)
+            self.diy_output("Given sha256 hash value is   :" + self.sha256_hash_value)
+            hash_value = self.compute_sha256_hash()
+            self.diy_output("Compute sha256 hash value is :" + hash_value)
             if (hash_value == self.sha256_hash_value):
-                print("Hash matched!")
+                self.diy_output("Hash matched!")
             else:
-                print("Hash not match.Maybe file is broken.")
+                self.diy_output("Hash not match.Maybe file is broken.")
         else:
-            print("Compute sha256 hash value is :" + compute_sha256_hash())
+            self.diy_output("Compute sha256 hash value is :" + self.compute_sha256_hash())
         return True
+
+    def speedtest_download(self, dp:download_progress):
+        self.get_new_request(dp=dp)
+        def is_not_finished()->bool:
+            return (dp.curr_start + dp.curr_getsize -1 != dp.curr_end)
+        with open(self.full_path_to_file, "rb+") as f:
+            f.seek(dp.curr_start)
+            dp.now_running()
+            while dp.keep_run and is_not_finished():
+                try:
+                    chunk_data = next(dp.it)
+                    chunk_data_len = len(chunk_data)
+                    dp.curr_getsize += chunk_data_len
+                    f.write(chunk_data)
+                except StopIteration:
+                    dp.it.close()
+                    break
+                except requests.ConnectionError as e:
+                    self.diy_output(f"worker:my_thread_id={dp.my_thread_id},known error=",e)
+                    break
+                except Exception as e:
+                    self.diy_output(f"worker:my_thread_id={dp.my_thread_id},unknow error=",e)
+                    break
+        if( is_not_finished() ):
+            self.diy_output(f"worker:my_thread_id={dp.my_thread_id}," + \
+                f"start={dp.curr_start} + getsize={dp.curr_getsize} -1 != end={dp.curr_end}," + \
+                "exit abnormally.")
+            dp.now_force_exit()
+            return None
+        dp.now_work_finished()
+        tmp_curr_getsize = dp.curr_getsize
+        dp.curr_getsize = 0
+        dp.history_done_size += tmp_curr_getsize
+        total_time = dp.duration
+        total_size = dp.history_done_size
+        average_speed = self.get_humanize_size(size_in_byte = total_size/total_time )
+        self.diy_output(f"worker:my_thread_id={dp.my_thread_id},my job had done." +\
+             f"Total downloaded:{self.get_humanize_size(total_size)}," +\
+             f"total_time={(total_time):.3f}s,"+ \
+             f"average_speed: {average_speed}/s,"+ \
+             f"retry_count={dp.retry_count}")
+        # time.sleep(0.2)
+        dp.now_exit()
+
+    def speedtest_countdown(self, 
+            dp:download_progress, 
+            timeout_to_stop ):
+        ds = dp.downloader_thread_status
+        while(ds == status_init or ds == status_ready):
+            ds = dp.downloader_thread_status
+            continue
+        time.sleep(timeout_to_stop)
+        if (dp.downloader_thread_status == status_running):
+            dp.request_context.raw._fp.close()
+
+    def speedtest_single_thread(self, timeout_to_stop):
+        if not self.download_init():
+            return None
+        self.diy_output("Debug version is running.")
+        self.diy_output("Starting speedtest...")
+        start = self.specific_range[0]
+        end = self.specific_range[1] -1
+        dp = download_progress(
+            start=start, 
+            end=end, 
+            my_thread_id=0, 
+            chunk_size=256 )
+        self.download_progress_list = [dp]
+        sc_thread = threading.Thread(
+            target=self.speedtest_countdown, 
+            args=[ dp, timeout_to_stop], 
+            daemon=True)
+        sc_thread.start()
+        speedtest_thread = threading.Thread(
+            target=self.speedtest_download,
+            args=[ dp ],
+            daemon=True)
+        speedtest_thread.start()
+        # self.speedtest_download(dp)
+        speedtest_thread.join()
+        return None
 
 if __name__ == "__main__":
     thread_num = 4
@@ -764,7 +856,8 @@ if __name__ == "__main__":
         specific_ip_address=specific_ip_address, 
         thread_num=thread_num,
         sha256_hash_value=sha256_hash_value,
-        specific_range=(0,134217728) )
+        specific_range=(0,134217728),
+        allow_print = True )
     down.main()
     
 
