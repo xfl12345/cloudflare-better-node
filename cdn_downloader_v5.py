@@ -16,7 +16,7 @@ from requests.sessions import HTTPAdapter
 from forced_ip_https_adapter import ForcedIPHTTPSAdapter
 
 # 最后一次代码修改时间
-__updated__ = "2021-02-21 13:03:40"
+__updated__ = "2021-02-23 14:54:49"
 __version__ = 0.5
 
 # download 线程状态常量
@@ -79,7 +79,8 @@ class my_thread_lock:
             self.lock.release()
             return True
         except RuntimeError as e:
-            print("my_thread_lock:error =",e)
+            pass
+            # print("my_thread_lock:error =",e)
         return False
 
 class download_progress:
@@ -104,6 +105,7 @@ class download_progress:
         self.start_time = 0
         self.end_time = 0
         self.duration = 0
+        self.running_status_tracker = None
         # 通过 hack 手段强行终止当前任务所需要的context
         self.request_context = None
         self.it = None  #request_context.iter_content
@@ -123,6 +125,7 @@ class download_progress:
         self.hack_send_close_signal_count = 0
         # 给watchdog看门狗看家的必要数据
         self.history_getsize = 0
+        self.last_check_time = 0
         # 千真万确的实际累计下载大小
         self.history_done_size = 0
         # 这个worker目前的工作状态
@@ -149,6 +152,7 @@ class download_progress:
 
     def now_running(self):
         self.start_time = time.time()
+        self.last_check_time = time.time()
         self.downloader_thread_status = status_running
 
     def now_work_finished(self):
@@ -169,6 +173,13 @@ class download_progress:
 
 class speedtest_info:
     pass
+
+class schedule_queue:
+    def __init__(self, 
+            dp_status):
+        self.dp_status = dp_status
+        self.queue:queue.Queue = queue.Queue()
+        self.lock = my_thread_lock()
 
 # source code URL: https://blog.csdn.net/qq_42951560/article/details/108785802
 class downloader:
@@ -226,13 +237,18 @@ class downloader:
 
         self.download_tp = None
         self.download_progress_list:list = []
-        self.status_running_queue:queue.Queue = queue.Queue()
-        self.status_exit_queue:queue.Queue = queue.Queue()
-        self.status_force_exit_queue:queue.Queue = queue.Queue()
-        self.status_pause_queue:queue.Queue = queue.Queue()
-        self.status_other_queue:queue.Queue = queue.Queue()
+        self.status_running_queue:schedule_queue = \
+            schedule_queue(dp_status=status_running)
+        self.status_exit_queue:schedule_queue = \
+            schedule_queue(dp_status=status_exit)
+        self.status_force_exit_queue:schedule_queue = \
+            schedule_queue(dp_status=status_force_exit)
+        self.status_pause_queue:schedule_queue = \
+            schedule_queue(dp_status=status_pause)
+        self.status_other_queue:schedule_queue = \
+            schedule_queue(dp_status=None)
+        self.watchdog_lock = my_thread_lock()
 
-        self.running_queue_lock = my_thread_lock()
         self.download_finished:bool = False
 
         if (sha256_hash_value != None):
@@ -249,13 +265,13 @@ class downloader:
             self.is_https = True
         
         if self.specific_ip_address != None and not self.is_https:
-            pattern = re.compile(r"http://"+self.hostname)
+            pattern = re.compile(r"http://"+ re.escape(self.hostname) )
             self.ip_direct_url = re.sub(pattern, \
                 repl="http://"+self.specific_ip_address ,string=self.url)
 
-    def diy_output(self,output_str:str=None, **kwargs):
+    def diy_output(self,*objects, sep=' ', end='\n', file=sys.stdout, flush=False):
         if self.allow_print:
-            print(output_str, **kwargs)
+            print(*objects, sep=sep, end=end, file=file, flush=flush)
 
     #source code URL:https://blog.csdn.net/mbh12333/article/details/103721834
     def get_file_name(self,url:str, response:Response)->str:
@@ -281,6 +297,7 @@ class downloader:
         dp.retry_count += 1
         dp.curr_getsize = 0
         dp.history_getsize = 0
+        # dp.keep_run = True
 
     def get_session_obj(self)->requests.Session:
         session = requests.Session()
@@ -355,19 +372,25 @@ class downloader:
             dp.now_running()
             while dp.keep_run and is_not_finished():
                 dp.is_need_to_pause()
+                dp.running_status_tracker = 0
                 try:
                     chunk_data = next(dp.it)
+                    dp.running_status_tracker = 1
                     chunk_data_len = len(chunk_data)
                     curr_position = dp.curr_start + dp.curr_getsize -1
+                    dp.running_status_tracker = 2
 
                     # For test
                     # if dp.curr_getsize > 30000 and dp.curr_getsize < 40000:
                     #     break
 
                     if is_enforce_mode and (curr_position + chunk_data_len > dp.curr_end):
+                        dp.running_status_tracker = 3
                         aim_len = dp.curr_end - curr_position
                         buffer = io.BytesIO(chunk_data)
+                        dp.running_status_tracker = 4
                         chunk_data = buffer.read(aim_len)
+                        dp.running_status_tracker = 5
                         self.diy_output(f"worker:my_thread_id={dp.my_thread_id},"+\
                             f"chunk_size=\"{dp.chunk_size}\" is too huge."+\
                             f"curr_position={curr_position},"+\
@@ -376,36 +399,57 @@ class downloader:
                             "curr_position + chunk_data_len > dp.curr_end. " +\
                             f"Resize chunk data to size={len(chunk_data)}.")
                         dp.curr_getsize += aim_len
+                        dp.running_status_tracker = 6
                         f.write(chunk_data)
+                        dp.running_status_tracker = 7
                         break
                     else:
                         # 统计已下载的数据大小，单位是字节（byte）
                         dp.curr_getsize += chunk_data_len
+                        dp.running_status_tracker = 8
                         f.write(chunk_data)
+                        dp.running_status_tracker = 9
                         # f.flush()
                 except StopIteration:
+                    dp.running_status_tracker = 10
                     dp.it.close()
+                    dp.running_status_tracker = 11
                     break
                 except requests.ConnectionError as e:
+                    dp.running_status_tracker = 12
                     self.diy_output(f"worker:my_thread_id={dp.my_thread_id},known error=",e)
-                    if( is_not_finished() ):
+                    if( dp.keep_run and is_not_finished() ):
+                        dp.running_status_tracker = 13
                         dp.now_init()
+                        dp.running_status_tracker = 14
                         dp.duration_count_up()
+                        dp.running_status_tracker = 15
                         self.diy_output(f"worker:my_thread_id={dp.my_thread_id},"+\
                             "did not finish yet.Retrying...")
+                        dp.running_status_tracker = 16
                         self.chunk_download_retry_init(dp=dp)
+                        dp.running_status_tracker = 17
                         self.get_new_request(dp=dp)
+                        dp.running_status_tracker = 18
                         f.seek(dp.curr_start)
+                        dp.running_status_tracker = 19
                         dp.now_running()
+                        dp.running_status_tracker = 20
+                    else:
+                        break
                 except Exception as e:
+                    dp.running_status_tracker = 21
                     self.diy_output(f"worker:my_thread_id={dp.my_thread_id},unknow error=",e)
                     break
         if( is_not_finished() ):
+            dp.running_status_tracker = 22
             self.diy_output(f"worker:my_thread_id={dp.my_thread_id}," + \
                 f"start={dp.curr_start} + getsize={dp.curr_getsize} -1 != end={dp.curr_end}," + \
                 "exit abnormally.")
             dp.now_force_exit()
+            dp.running_status_tracker = 23
             return None
+        dp.running_status_tracker = 24
         dp.now_work_finished()
         tmp_curr_getsize = dp.curr_getsize
         dp.curr_getsize = 0
@@ -414,10 +458,10 @@ class downloader:
         total_size = dp.history_done_size
         average_speed = self.get_humanize_size(size_in_byte = total_size/total_time )
         self.diy_output(f"worker:my_thread_id={dp.my_thread_id},my job had done." +\
-             f"Total downloaded:{self.get_humanize_size(total_size)}," +\
-             f"total_time={(total_time):.3f}s,"+ \
+             f"Total downloaded: {self.get_humanize_size(total_size)}," +\
+             f"total_time: {(total_time):.3f}s,"+ \
              f"average_speed: {average_speed}/s,"+ \
-             f"retry_count={dp.retry_count}")
+             f"retry_count: {dp.retry_count}")
         # time.sleep(0.2)
         dp.now_exit()
 
@@ -460,8 +504,8 @@ class downloader:
     def update_download_finished_flag(self):
         self.download_finished = self.is_download_finished()
 
-
     def download_monitor_str(self):
+        # last_process = 0
         while True:
             last = sum( self.dp_list_getsize() )
             time.sleep(1)
@@ -475,42 +519,44 @@ class downloader:
                 complete_size_str = self.get_humanize_size(size_in_byte = complete_size )
                 self.diy_output(f"downloaded: {complete_size_str:10} | process: {100.00:6}% | speed:  0Byte/s ", end=" | ")
                 break
+            # if last_process == process:
+            #     self.diy_output("Maybe something went wrong...")
+            # last_process = process
         
     def schedule_dp_deliver(self, dp:download_progress):
         ds = dp.downloader_thread_status
         if ds == status_running:
-            self.status_running_queue.put(dp)
+            self.status_running_queue.queue.put(dp)
+            self.status_running_queue.lock.unlock()
         elif ds == status_exit:
-            self.status_exit_queue.put(dp)
+            self.status_exit_queue.queue.put(dp)
+            self.status_exit_queue.lock.unlock()
         elif ds == status_force_exit:
-            self.status_force_exit_queue.put(dp)
+            self.status_force_exit_queue.queue.put(dp)
+            self.status_force_exit_queue.lock.unlock()
         elif ds == status_pause:
-            self.status_pause_queue.put(dp)
+            self.status_pause_queue.queue.put(dp)
+            self.status_pause_queue.lock.unlock()
         else:
-            self.status_other_queue.put(dp)
+            self.status_other_queue.queue.put(dp)
+            self.status_other_queue.lock.unlock()
 
     def schedule_scan_dp_list(self):
         for dp in self.download_progress_list:
             self.schedule_dp_deliver(dp=dp)
 
     def schedule_status_running_queue(self):
-        my_queue = self.status_running_queue
-        while not my_queue.empty():
-            if not self.running_queue_lock.trylock():
-                break
-            dp:download_progress = my_queue.get()
-            if dp.downloader_thread_status != status_running :
-                self.schedule_dp_deliver(dp=dp)
-            else:
-                my_queue.put(dp)
-            self.running_queue_lock.unlock()
+        my_schedule_queue = self.status_running_queue
+        while not my_schedule_queue.queue.empty():
+            dp:download_progress = my_schedule_queue.queue.get()
+            # TODO: do something but never put item back to queue
+        my_schedule_queue.lock.block_myself()
 
     def schedule_status_force_exit_queue(self):
-        my_queue = self.status_force_exit_queue
-        while not my_queue.empty():
-            dp:download_progress = my_queue.get()
+        my_schedule_queue = self.status_force_exit_queue
+        while not my_schedule_queue.queue.empty():
+            dp:download_progress = my_schedule_queue.queue.get()
             if dp.downloader_thread_status != status_force_exit:
-                self.schedule_dp_deliver(dp=dp)
                 continue
             dp.now_init()
             self.chunk_download_retry_init(dp=dp)
@@ -528,66 +574,68 @@ class downloader:
             else:
                 self.diy_output(f"schedule:thread_id={dp.my_thread_id},"+\
                     f"resubmit succeed!{' '*30}")
-            my_queue.put(dp)
+        my_schedule_queue.lock.block_myself()
+            
+
 
     def schedule_status_exit_queue(self):
-        my_queue = self.status_exit_queue
-        while not my_queue.empty():
-            dp:download_progress = my_queue.get()
-            if dp.downloader_thread_status != status_exit:
-                self.schedule_dp_deliver(dp=dp)
-                continue
-            my_queue.put(dp)
+        my_schedule_queue = self.status_exit_queue
+        while not my_schedule_queue.queue.empty():
+            dp:download_progress = my_schedule_queue.queue.get()
+            # TODO: do something but never put item back to queue
+        my_schedule_queue.lock.block_myself()
     
     def schedule_status_pause_queue(self):
-        my_queue = self.status_pause_queue
-        while not my_queue.empty():
-            dp:download_progress = my_queue.get()
-            if dp.downloader_thread_status != status_pause:
-                self.schedule_dp_deliver(dp=dp)
-                continue
-            my_queue.put(dp)
+        my_schedule_queue = self.status_pause_queue
+        while not my_schedule_queue.queue.empty():
+            dp:download_progress = my_schedule_queue.queue.get()
+            # TODO: do something but never put item back to queue
+        my_schedule_queue.lock.block_myself()
 
     def schedule_status_other_queue(self):
-        my_queue = self.status_other_queue
-        while not my_queue.empty():
-            dp:download_progress = my_queue.get()
-            self.schedule_dp_deliver(dp=dp)
-            time.sleep(0.5)
+        my_schedule_queue = self.status_other_queue
+        while not my_schedule_queue.queue.empty():
+            dp:download_progress = my_schedule_queue.queue.get()
+            # TODO: do something but never put item back to queue
+            # time.sleep(0.1)
+        my_schedule_queue.lock.block_myself()
 
     def schedule_main(self):
+        schedule_postman = threading.Thread(
+            target=self.keep_run_until_download_finished, 
+            args=[ self.schedule_scan_dp_list, 
+                self.schedule_frequent ],
+            daemon=True)
+        schedule_postman.start()
+
         self.schedule_scan_dp_list()
         udff = threading.Thread(
             target=self.keep_run_until_download_finished, 
-            args=[ self.update_download_finished_flag, 
-                0.2 ],
+            args=[ self.update_download_finished_flag, 0.2 ],
             daemon=True)
         udff.start()
+
         ss_running = threading.Thread(
             target=self.keep_run_until_download_finished, 
-            args=[ self.schedule_status_running_queue, 
-                self.schedule_frequent ],
+            args=[ self.schedule_status_running_queue, 0 ],
             daemon=True)
         ss_exit = threading.Thread(
             target=self.keep_run_until_download_finished, 
-            args=[ self.schedule_status_exit_queue, 
-                self.schedule_frequent ],
+            args=[ self.schedule_status_exit_queue, 0 ],
             daemon=True)
         ss_force_exit = threading.Thread(
             target=self.keep_run_until_download_finished, 
-            args=[ self.schedule_status_force_exit_queue, 
-                self.schedule_frequent ], 
+            args=[ self.schedule_status_force_exit_queue, 0 ], 
             daemon=True)
         ss_pause = threading.Thread(
             target=self.keep_run_until_download_finished, 
-            args=[ self.schedule_status_pause_queue, 
-                self.schedule_frequent ],
+            args=[ self.schedule_status_pause_queue, 0 ],
             daemon=True)
         ss_other = threading.Thread(
             target=self.keep_run_until_download_finished, 
-            args=[ self.schedule_status_other_queue, 
-                0 ],
+            args=[ self.schedule_status_other_queue, 0 ],
             daemon=True)
+        
         ss_running.start()
         ss_exit.start()
         ss_force_exit.start()
@@ -596,18 +644,19 @@ class downloader:
 
     def download_watchdog(self):
         self.diy_output("download_watchdog is running...")
-        my_queue = self.status_running_queue
         while( not self.download_finished ):
             time.sleep(self.watchdog_frequent)
-            self.running_queue_lock.just_get_lock()
-            while not my_queue.empty():
-                dp:download_progress = my_queue.get()
+            self.watchdog_lock.just_get_lock()
+            for dp in self.download_progress_list :
+                dp:download_progress
                 if dp.downloader_thread_status != status_running :
-                    self.schedule_dp_deliver(dp=dp)
+                    continue
+                if (time.time() - dp.last_check_time < 5):
                     continue
                 if (dp.curr_getsize > dp.history_getsize) and \
                     (dp.curr_getsize != 0):
                     dp.history_getsize = dp.curr_getsize
+                    dp.last_check_time = time.time()
                     continue
                 if dp.keep_run :
                     self.diy_output(f"watchdog:thread_id={dp.my_thread_id},"+\
@@ -616,14 +665,17 @@ class downloader:
                     dp.keep_run = False
                 else:
                     self.diy_output(f"watchdog:thread_id={dp.my_thread_id},"+\
-                        f"failed to terminate!Retrying...{' '*30}")
-                try:
-                    dp.request_context.raw._fp.close()
-                    dp.hack_send_close_signal_count += 1
-                except Exception:
-                    pass
-                my_queue.put(dp)
-            self.running_queue_lock.unlock()
+                        "failed to terminate!"+\
+                        f"tracker={dp.running_status_tracker},"+\
+                        f"Retrying...{' '*30}")
+
+                    try:
+                        dp.request_context.raw._fp.close()
+                        dp.hack_send_close_signal_count += 1
+                    except Exception:
+                        pass
+                dp.last_check_time = time.time()
+            self.watchdog_lock.unlock()
         self.diy_output("download_watchdog exited.")
 
     def get_response_with_content_length(self):

@@ -1,21 +1,16 @@
-import io
-import os
-import sys
-import time
-import threading
-import requests
-import re
-import hashlib
-import typing
-import queue
-
-
 from cdn_downloader_v5 import downloader
 from cdn_downloader_v5 import download_progress
 
 # 最后一次代码修改时间
-__updated__ = "2021-02-21 13:03:59"
+__updated__ = "2021-02-23 14:59:29"
 __version__ = 0.1
+
+
+class cdn_speedtest:
+    
+
+    pass
+
 
 if __name__ == "__main__":
     specific_ip_address = "1.0.0.66"
