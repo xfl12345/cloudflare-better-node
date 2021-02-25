@@ -59,6 +59,7 @@ This repo relies on the following third-party projects:
     + [github/forced_ip_https_adapter](https://github.com/Roadmaster/forcediphttpsadapter/blob/master/forcediphttpsadapter/adapters.py)
     + [csdn/get_file_name](https://blog.csdn.net/mbh12333/article/details/103721834)
   + [cdn_speedtest_v1](cdn_speedtest_v1.py)
+  + [pings](https://github.com/satoshi03/pings)
 
 + For testing only:
   + None
