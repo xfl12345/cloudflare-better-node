@@ -21,13 +21,9 @@
 ## 进度
 
 + 下载器(cdn_downloader_v5.py)  
-  origin code URL = <https://blog.csdn.net/qq_42951560/article/details/108785802>  
   + 已完成功能：  
     1. 不依赖pycurl包，不修改系统hosts文件，实现http/https访问域名时指定IPv4地址  
-       powered by "forced_ip_https_adapter.py"  
-       source code URL = <https://github.com/Roadmaster/forcediphttpsadapter/blob/master/forcediphttpsadapter/adapters.py>  
     2. 自动从URL截取或通过访问URL来获取未定义的下载文件名  
-       source code URL = <https://blog.csdn.net/mbh12333/article/details/103721834>  
     3. 多线程分段下载，精确到byte级别  
     4. 等待数据超时自动重新发起请求  
     5. watchdog看门狗。自动发现“僵尸线程”并重启问题线程  
@@ -52,3 +48,17 @@ Done is better than perfact.
 但是它快且解渴啊！  
 所以打算优先实现speedtest功能，回头再去开发downloader这个核心功能。  
 因此downloader暂时告一段落了。。  
+
+## Credits  
+
+This repo relies on the following third-party projects:  
+
++ In production:
+  + [cdn_downloader_v5](cdn_downloader_v5.py)
+    + [downloader](https://blog.csdn.net/qq_42951560/article/details/108785802)
+    + [forced_ip_https_adapter](https://github.com/Roadmaster/forcediphttpsadapter/blob/master/forcediphttpsadapter/adapters.py)
+    + [get_file_name](https://blog.csdn.net/mbh12333/article/details/103721834)
+  + [cdn_speedtest_v1](cdn_speedtest_v1.py)
+
++ For testing only:
+  + None
