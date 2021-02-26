@@ -14,22 +14,25 @@ from urllib import parse
 from requests.models import Response
 from requests.sessions import HTTPAdapter
 from forced_ip_https_adapter import ForcedIPHTTPSAdapter
-
-# 最后一次代码修改时间
-__updated__ = "2021-02-23 14:54:49"
-__version__ = 0.5
+from my_ram_io import LimitedBytearrayIO
 
 # download 线程状态常量
-status_init = 0
-status_ready = 1
-status_running = 2
-status_work_finished = 3
-status_exit = 4
-status_force_exit = 5
-status_pause = 6
+from my_const import STATUS_INIT
+from my_const import STATUS_READY
+from my_const import STATUS_RUNNING
+from my_const import STATUS_WORK_FINISHED
+from my_const import STATUS_EXIT
+from my_const import STATUS_FORCE_EXIT
+from my_const import STATUS_PAUSE
+
 # 对 download 过程中的 getsize 约束程度
-level_enforce = 0     # 绝对精准，精准至byte级别
-level_permissive = 1  # 宽松，达量即可，允许超量
+from my_const import LEVEL_ENFORCE      # 绝对精准，精准至byte级别
+from my_const import LEVEL_PERMISSIVE   # 宽松，达量即可，允许超量
+
+
+# 最后一次代码修改时间
+__updated__ = "2021-02-26 17:23:42"
+__version__ = 0.5
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
 class my_thread_lock:
@@ -89,7 +92,7 @@ class download_progress:
         end, 
         my_thread_id:int=0, 
         chunk_size:int=512,
-        getsize_strict_level=level_enforce,
+        getsize_strict_level=LEVEL_ENFORCE,
         **kwargs):
         self.chunk_size = chunk_size
         self.getsize_strict_level = getsize_strict_level
@@ -129,7 +132,7 @@ class download_progress:
         # 千真万确的实际累计下载大小
         self.history_done_size = 0
         # 这个worker目前的工作状态
-        self.downloader_thread_status = status_init
+        self.downloader_thread_status = STATUS_INIT
         self.my_future = None
 
     def duration_count_up(self):
@@ -145,18 +148,18 @@ class download_progress:
         return self.curr_end - self.curr_start +1
 
     def now_init(self):
-        self.downloader_thread_status = status_init
+        self.downloader_thread_status = STATUS_INIT
     
     def now_ready(self):
-        self.downloader_thread_status = status_ready
+        self.downloader_thread_status = STATUS_READY
 
     def now_running(self):
         self.start_time = time.time()
         self.last_check_time = time.time()
-        self.downloader_thread_status = status_running
+        self.downloader_thread_status = STATUS_RUNNING
 
     def now_work_finished(self):
-        self.downloader_thread_status = status_work_finished
+        self.downloader_thread_status = STATUS_WORK_FINISHED
         self.duration_count_up()
         self.end_time = time.time()
         try:
@@ -165,14 +168,11 @@ class download_progress:
             pass
 
     def now_exit(self):
-        self.downloader_thread_status = status_exit
+        self.downloader_thread_status = STATUS_EXIT
 
     def now_force_exit(self):
         self.duration_count_up()
-        self.downloader_thread_status = status_force_exit
-
-class speedtest_info:
-    pass
+        self.downloader_thread_status = STATUS_FORCE_EXIT
 
 class schedule_queue:
     def __init__(self, 
@@ -183,15 +183,14 @@ class schedule_queue:
 
 # source code URL: https://blog.csdn.net/qq_42951560/article/details/108785802
 class downloader:
-    const_one_of_1024:float = 0.0009765625 # 1/1024
+    ONE_OF_1024:float = 0.0009765625 # 1/1024
     default_filename:str = "url_did_not_provide_filename"
     """
     specific_range 要求传入的是一个长度为 2 的Tuple元组，包含(start_from, end_at)两个参数
     """
     def __init__(self, 
             url:str, 
-            filename:str="url_did_not_provide_filename", 
-            storage_root:str="downloads/",
+            download_as_file:bool=True,
             thread_num:int=4,
             max_retries:int=3,
             timeout:float=3,
@@ -211,9 +210,16 @@ class downloader:
             "python_requests/" + str(requests.__version__) + " " +\
             f"cloudflare-better-node/{__version__} (github.com@xfl12345) "
         self.url:str = url
-        self.filename:str = filename 
-        self.storage_root:str = storage_root
-        self.full_path_to_file:str = storage_root + filename
+        self.download_to_ram = bytearray()
+        self.filename:str = self.default_filename 
+        self.storage_root:str = "downloads/"
+        self.download_as_file:bool = download_as_file
+        if self.download_as_file :
+            if "filename" in kwargs:
+                self.filename:str = str(kwargs.pop("filename"))
+            if "storage_root" in kwargs:
+                self.storage_root:str = str(kwargs.pop("storage_root"))
+        self.full_path_to_file:str = self.storage_root + self.filename
         # 看门狗检查线程的频率，每多少秒检查一次
         self.watchdog_frequent = 5
         # 调度系统检查线程的频率，每多少秒检查一次
@@ -238,13 +244,13 @@ class downloader:
         self.download_tp = None
         self.download_progress_list:list = []
         self.status_running_queue:schedule_queue = \
-            schedule_queue(dp_status=status_running)
+            schedule_queue(dp_status=STATUS_RUNNING)
         self.status_exit_queue:schedule_queue = \
-            schedule_queue(dp_status=status_exit)
+            schedule_queue(dp_status=STATUS_EXIT)
         self.status_force_exit_queue:schedule_queue = \
-            schedule_queue(dp_status=status_force_exit)
+            schedule_queue(dp_status=STATUS_FORCE_EXIT)
         self.status_pause_queue:schedule_queue = \
-            schedule_queue(dp_status=status_pause)
+            schedule_queue(dp_status=STATUS_PAUSE)
         self.status_other_queue:schedule_queue = \
             schedule_queue(dp_status=None)
         self.watchdog_lock = my_thread_lock()
@@ -305,8 +311,7 @@ class downloader:
             if self.specific_ip_address == None :
                 session.mount(prefix="https://", adapter=ForcedIPHTTPSAdapter(max_retries=self.max_retries) )
             else:
-                session.mount(prefix="https://" , adapter=ForcedIPHTTPSAdapter(max_retries=self.max_retries, 
-                    dest_ip=self.specific_ip_address))
+                session.mount(prefix="https://" , adapter=ForcedIPHTTPSAdapter(max_retries=self.max_retries, dest_ip=self.specific_ip_address))
         else:
             session.mount(prefix="http://", adapter=HTTPAdapter(max_retries=self.max_retries) )
         return session
@@ -360,87 +365,107 @@ class downloader:
     def download(self, dp:download_progress):
         self.get_new_request(dp=dp)
         is_enforce_mode:bool = True
-        if dp.getsize_strict_level != level_enforce:
+        if dp.getsize_strict_level != LEVEL_ENFORCE:
             is_enforce_mode = False
+        f = None
+        # file write init
+        if self.download_as_file :
+            f = open(self.full_path_to_file, "rb+")
+        else:
+            f = LimitedBytearrayIO(self.download_to_ram)
+            # f = memoryview(self.download_to_ram)
+        f.seek(dp.curr_start)
+        # def save_data(data_in_bytearray, curr_pos):
+        #     if self.download_as_file :
+        #         f.write(data_in_bytearray)
+        #     else:
+        #         end = curr_pos + len(data_in_bytearray)
+        #         f[curr_pos:end] = data_in_bytearray
         def is_not_finished()->bool:
             if is_enforce_mode:
                 return (dp.curr_start + dp.curr_getsize -1 != dp.curr_end)
             else:
                 return (dp.curr_start + dp.curr_getsize -1 <  dp.curr_end )
-        with open(self.full_path_to_file, "rb+") as f:
-            f.seek(dp.curr_start)
-            dp.now_running()
-            while dp.keep_run and is_not_finished():
-                dp.is_need_to_pause()
-                dp.running_status_tracker = 0
-                try:
-                    chunk_data = next(dp.it)
-                    dp.running_status_tracker = 1
+
+        dp.now_running()
+        while dp.keep_run and is_not_finished():
+            dp.is_need_to_pause()
+            dp.running_status_tracker = 0
+            try:
+                chunk_data = next(dp.it)
+                dp.running_status_tracker = 1
+                chunk_data_len = len(chunk_data)
+                curr_position = dp.curr_start + dp.curr_getsize
+                dp.running_status_tracker = 2
+
+                # For test
+                # if dp.curr_getsize > 30000 and dp.curr_getsize < 40000:
+                #     break
+
+                if is_enforce_mode and (curr_position + chunk_data_len -1 > dp.curr_end):
+                    dp.running_status_tracker = 3
+                    aim_len = dp.curr_end - curr_position
+                    buffer = io.BytesIO(chunk_data)
+                    dp.running_status_tracker = 4
+                    chunk_data = buffer.read(aim_len)
+                    buffer.close()
+                    dp.running_status_tracker = 5
                     chunk_data_len = len(chunk_data)
-                    curr_position = dp.curr_start + dp.curr_getsize -1
-                    dp.running_status_tracker = 2
-
-                    # For test
-                    # if dp.curr_getsize > 30000 and dp.curr_getsize < 40000:
-                    #     break
-
-                    if is_enforce_mode and (curr_position + chunk_data_len > dp.curr_end):
-                        dp.running_status_tracker = 3
-                        aim_len = dp.curr_end - curr_position
-                        buffer = io.BytesIO(chunk_data)
-                        dp.running_status_tracker = 4
-                        chunk_data = buffer.read(aim_len)
-                        dp.running_status_tracker = 5
-                        self.diy_output(f"worker:my_thread_id={dp.my_thread_id},"+\
-                            f"chunk_size=\"{dp.chunk_size}\" is too huge."+\
-                            f"curr_position={curr_position},"+\
-                            f"chunk_data_len={chunk_data_len},"+\
-                            f"dp.curr_end={dp.curr_end},"+\
-                            "curr_position + chunk_data_len > dp.curr_end. " +\
-                            f"Resize chunk data to size={len(chunk_data)}.")
-                        dp.curr_getsize += aim_len
-                        dp.running_status_tracker = 6
-                        f.write(chunk_data)
-                        dp.running_status_tracker = 7
-                        break
-                    else:
-                        # 统计已下载的数据大小，单位是字节（byte）
-                        dp.curr_getsize += chunk_data_len
-                        dp.running_status_tracker = 8
-                        f.write(chunk_data)
-                        dp.running_status_tracker = 9
-                        # f.flush()
-                except StopIteration:
-                    dp.running_status_tracker = 10
-                    dp.it.close()
-                    dp.running_status_tracker = 11
+                    dp.running_status_tracker = 6
+                    self.diy_output(f"worker:my_thread_id={dp.my_thread_id},"+\
+                        f"chunk_size=\"{dp.chunk_size}\" is too huge."+\
+                        f"curr_position={curr_position},"+\
+                        f"chunk_data_len={chunk_data_len},"+\
+                        f"dp.curr_end={dp.curr_end},"+\
+                        "curr_position + chunk_data_len > dp.curr_end. " +\
+                        f"Resize chunk data to size={chunk_data_len}.")
+                    dp.keep_run = False
+                dp.running_status_tracker = 7
+                # 统计已下载的数据大小，单位是字节（byte）
+                dp.curr_getsize += chunk_data_len
+                dp.running_status_tracker = 8
+                # save_data(chunk_data, curr_position)
+                f.write(chunk_data)
+                dp.running_status_tracker = 9
+                # f.flush()
+            except StopIteration:
+                dp.running_status_tracker = 10
+                dp.it.close()
+                dp.running_status_tracker = 11
+                break
+            except requests.ConnectionError as e:
+                dp.running_status_tracker = 12
+                self.diy_output(f"worker:my_thread_id={dp.my_thread_id},known error=",e)
+                if( dp.keep_run and is_not_finished() ):
+                    dp.running_status_tracker = 13
+                    dp.now_init()
+                    dp.running_status_tracker = 14
+                    dp.duration_count_up()
+                    dp.running_status_tracker = 15
+                    self.diy_output(f"worker:my_thread_id={dp.my_thread_id},"+\
+                        "did not finish yet.Retrying...")
+                    dp.running_status_tracker = 16
+                    self.chunk_download_retry_init(dp=dp)
+                    dp.running_status_tracker = 17
+                    self.get_new_request(dp=dp)
+                    dp.running_status_tracker = 18
+                    # if self.download_as_file :
+                    #     f.seek(dp.curr_start)
+                    f.seek(dp.curr_start)
+                    dp.running_status_tracker = 19
+                    dp.now_running()
+                    dp.running_status_tracker = 20
+                else:
                     break
-                except requests.ConnectionError as e:
-                    dp.running_status_tracker = 12
-                    self.diy_output(f"worker:my_thread_id={dp.my_thread_id},known error=",e)
-                    if( dp.keep_run and is_not_finished() ):
-                        dp.running_status_tracker = 13
-                        dp.now_init()
-                        dp.running_status_tracker = 14
-                        dp.duration_count_up()
-                        dp.running_status_tracker = 15
-                        self.diy_output(f"worker:my_thread_id={dp.my_thread_id},"+\
-                            "did not finish yet.Retrying...")
-                        dp.running_status_tracker = 16
-                        self.chunk_download_retry_init(dp=dp)
-                        dp.running_status_tracker = 17
-                        self.get_new_request(dp=dp)
-                        dp.running_status_tracker = 18
-                        f.seek(dp.curr_start)
-                        dp.running_status_tracker = 19
-                        dp.now_running()
-                        dp.running_status_tracker = 20
-                    else:
-                        break
-                except Exception as e:
-                    dp.running_status_tracker = 21
-                    self.diy_output(f"worker:my_thread_id={dp.my_thread_id},unknow error=",e)
-                    break
+            except Exception as e:
+                dp.running_status_tracker = 21
+                self.diy_output(f"worker:my_thread_id={dp.my_thread_id},unknow error=",e)
+                break
+        f.close()
+        # if self.download_as_file :
+        #     f.close()
+        # else:
+        #     f.release()
         if( is_not_finished() ):
             dp.running_status_tracker = 22
             self.diy_output(f"worker:my_thread_id={dp.my_thread_id}," + \
@@ -472,22 +497,22 @@ class downloader:
             return str(size_in_byte) + "byte"
         elif size_in_byte < 0x100000: # size under 1MiB (1048576 Bytes)
             result_num = (size_in_byte >> 10) + \
-                ((size_in_byte & 0x3FF)*self.const_one_of_1024 )
+                ((size_in_byte & 0x3FF)*self.ONE_OF_1024 )
             return ("%.3f"%result_num) + "KiB"
         elif size_in_byte < 0x40000000: # size under 1GiB (1073741824 Bytes)
             result_num = (size_in_byte >> 20) + \
-                (((size_in_byte & 0xFFC00) >> 10)*self.const_one_of_1024 )
+                (((size_in_byte & 0xFFC00) >> 10)*self.ONE_OF_1024 )
             return ("%.3f"%result_num) + "MiB"
         # size equal or greater than 1GiB... Wow!
         result_num = (size_in_byte >> 30) + \
-                (((size_in_byte & 0x3FF00000) >> 20)*self.const_one_of_1024 )
+                (((size_in_byte & 0x3FF00000) >> 20)*self.ONE_OF_1024 )
         return ("%.3f"%result_num) + "GiB"
-    
+
     def dp_list_getsize(self):
         dp:download_progress
         for dp in self.download_progress_list:
             yield (dp.history_done_size + dp.curr_getsize)
-    
+
     def dp_list_truesize(self):
         dp:download_progress
         for dp in self.download_progress_list:
@@ -505,7 +530,8 @@ class downloader:
         self.download_finished = self.is_download_finished()
 
     def download_monitor_str(self):
-        # last_process = 0
+        last_process = 0
+        little_watchdog = time.time()
         while True:
             last = sum( self.dp_list_getsize() )
             time.sleep(1)
@@ -519,22 +545,25 @@ class downloader:
                 complete_size_str = self.get_humanize_size(size_in_byte = complete_size )
                 self.diy_output(f"downloaded: {complete_size_str:10} | process: {100.00:6}% | speed:  0Byte/s ", end=" | ")
                 break
-            # if last_process == process:
-            #     self.diy_output("Maybe something went wrong...")
-            # last_process = process
-        
+            if last_process == process:
+                if time.time() - little_watchdog > 5:
+                    self.diy_output("Maybe something went wrong...")
+            else:
+                little_watchdog = time.time()
+            last_process = process
+
     def schedule_dp_deliver(self, dp:download_progress):
         ds = dp.downloader_thread_status
-        if ds == status_running:
+        if ds == STATUS_RUNNING:
             self.status_running_queue.queue.put(dp)
             self.status_running_queue.lock.unlock()
-        elif ds == status_exit:
+        elif ds == STATUS_EXIT:
             self.status_exit_queue.queue.put(dp)
             self.status_exit_queue.lock.unlock()
-        elif ds == status_force_exit:
+        elif ds == STATUS_FORCE_EXIT:
             self.status_force_exit_queue.queue.put(dp)
             self.status_force_exit_queue.lock.unlock()
-        elif ds == status_pause:
+        elif ds == STATUS_PAUSE:
             self.status_pause_queue.queue.put(dp)
             self.status_pause_queue.lock.unlock()
         else:
@@ -556,10 +585,11 @@ class downloader:
         my_schedule_queue = self.status_force_exit_queue
         while not my_schedule_queue.queue.empty():
             dp:download_progress = my_schedule_queue.queue.get()
-            if dp.downloader_thread_status != status_force_exit:
+            if dp.downloader_thread_status != STATUS_FORCE_EXIT:
                 continue
             dp.now_init()
             self.chunk_download_retry_init(dp=dp)
+            dp.keep_run = True
             self.diy_output("schedule:Resubmit a worker,"+\
                 f"my_thread_id={dp.my_thread_id},"+\
                 f"start_from={dp.curr_start}," + \
@@ -575,8 +605,6 @@ class downloader:
                 self.diy_output(f"schedule:thread_id={dp.my_thread_id},"+\
                     f"resubmit succeed!{' '*30}")
         my_schedule_queue.lock.block_myself()
-            
-
 
     def schedule_status_exit_queue(self):
         my_schedule_queue = self.status_exit_queue
@@ -584,7 +612,7 @@ class downloader:
             dp:download_progress = my_schedule_queue.queue.get()
             # TODO: do something but never put item back to queue
         my_schedule_queue.lock.block_myself()
-    
+
     def schedule_status_pause_queue(self):
         my_schedule_queue = self.status_pause_queue
         while not my_schedule_queue.queue.empty():
@@ -649,7 +677,7 @@ class downloader:
             self.watchdog_lock.just_get_lock()
             for dp in self.download_progress_list :
                 dp:download_progress
-                if dp.downloader_thread_status != status_running :
+                if dp.downloader_thread_status != STATUS_RUNNING :
                     continue
                 if (time.time() - dp.last_check_time < 5):
                     continue
@@ -718,11 +746,16 @@ class downloader:
     def download_init(self)->bool:
         self.diy_output("Download URL="+self.url)
         self.diy_output("user_agent="+self.user_agent)
+        self.diy_output("Sending request for URL detail...")
+        start_time = time.time()
         # 从回复数据获取文件大小
         r = self.get_response_with_content_length()
+        took_time = "%.3f"%(time.time()-start_time)
+        self.diy_output("Took {} seconds.".format(took_time) )
         if r == None:
             self.diy_output("File size request failed.Download canceled!")
             return False
+        self.diy_output("Vaild response received.")
         origin_size = int(r.headers["Content-Length"])
         if not self.download_range_init(origin_size=origin_size):
             return False
@@ -732,26 +765,39 @@ class downloader:
             self.filename = self.get_file_name(url=self.url, response=r)
         r.close()
         self.full_path_to_file = self.storage_root + self.filename
-        self.diy_output("Download file path=\"{}\"".format(self.full_path_to_file))
+        if self.download_as_file:
+            self.diy_output("Download file path=\"{}\"".format(self.full_path_to_file))
+        else:
+            self.diy_output("Download file path=\"RAM\"")
         self.diy_output("Download file origin size={}".format(self.get_humanize_size(self.origin_size)))
         self.diy_output("Download file size={}".format(self.get_humanize_size(self.total_workload)))
         self.diy_output("File space allocating...")
         start_time = time.time()
-        # 优先创建 size 大小的占位文件
-        f = open(self.full_path_to_file, "wb")
-        f.truncate(self.total_workload)
-        f.close()
+        if self.download_as_file:
+            # 优先创建 size 大小的占位文件
+            f = open(self.full_path_to_file, "wb")
+            f.truncate(self.total_workload)
+            f.close()
+        else:
+            # 优先占用 size 大小的RAM内存空间
+            self.download_to_ram = bytearray(self.total_workload)
         took_time = "%.3f"%(time.time()-start_time)
-        self.diy_output("File space allocated.Took {} seconds.".format(took_time) )
+        self.diy_output("Took {} seconds.".format(took_time) )
+        self.diy_output("File space allocated.")
         return True
 
 
     def compute_sha256_hash(self)->str:
-        with open(self.full_path_to_file, "rb") as f:
-            sha256_obj = hashlib.sha256()
-            sha256_obj.update(f.read())
-            hash_value = sha256_obj.hexdigest().upper()
-            return hash_value
+        file_data = None
+        if self.download_as_file :
+            with open(self.full_path_to_file, "rb") as file_stream:
+                file_data = file_stream.read()
+        else:
+            file_data = self.download_to_ram
+        sha256_obj = hashlib.sha256()
+        sha256_obj.update(file_data)
+        hash_value = sha256_obj.hexdigest().upper()
+        return hash_value
 
     def main(self)->bool:
         # self.diy_output("Download mission overview:")
@@ -853,11 +899,11 @@ class downloader:
             dp:download_progress, 
             timeout_to_stop ):
         ds = dp.downloader_thread_status
-        while(ds == status_init or ds == status_ready):
+        while(ds == STATUS_INIT or ds == STATUS_READY):
             ds = dp.downloader_thread_status
             continue
         time.sleep(timeout_to_stop)
-        if (dp.downloader_thread_status == status_running):
+        if (dp.downloader_thread_status == STATUS_RUNNING):
             dp.request_context.raw._fp.close()
 
     def speedtest_single_thread(self, timeout_to_stop):
@@ -888,17 +934,19 @@ class downloader:
         return None
 
 if __name__ == "__main__":
-    thread_num = 4
-    specific_ip_address = "1.0.0.66"
+    thread_num = 32
+    specific_ip_address = "1.0.0.0"
     # specific_ip_address = "1.0.0.100"
     # specific_ip_address = None
     sha256_hash_value = None
+    specific_range = None
     # url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
     # sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
     url = "https://speed.haoren.ml/cache.jpg"
     # sha256_hash_value = "A0D7DD06B54AFBDFB6811718337C6EB857885C489DA6304DAB1344ECC992B3DB"
     # 128 MiB version
     sha256_hash_value = "45A3AE1D8321E9C99A5AEEA31A2993CF1E384661326C3D238FFAFA2D7451AEDB"
+    specific_range = (0,134217728)
     # url = "https://speed.cloudflare.com/__down?bytes=90"
     # sha256_hash_value = None
     # url = "http://127.0.0.1/download/text/123.txt"
@@ -908,7 +956,7 @@ if __name__ == "__main__":
         specific_ip_address=specific_ip_address, 
         thread_num=thread_num,
         sha256_hash_value=sha256_hash_value,
-        specific_range=(0,134217728),
+        specific_range=specific_range,
         allow_print = True )
     down.main()
     
