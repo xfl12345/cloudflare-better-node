@@ -31,7 +31,7 @@ from my_const import LEVEL_PERMISSIVE   # 宽松，达量即可，允许超量
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-02-26 18:35:24"
+__updated__ = "2021-02-26 20:12:05"
 __version__ = 0.5
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
