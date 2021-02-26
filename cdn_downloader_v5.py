@@ -31,7 +31,7 @@ from my_const import LEVEL_PERMISSIVE   # 宽松，达量即可，允许超量
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-02-26 17:23:42"
+__updated__ = "2021-02-26 18:35:24"
 __version__ = 0.5
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
@@ -404,7 +404,14 @@ class downloader:
 
                 if is_enforce_mode and (curr_position + chunk_data_len -1 > dp.curr_end):
                     dp.running_status_tracker = 3
-                    aim_len = dp.curr_end - curr_position
+                    aim_len = dp.curr_end - curr_position +1
+                    self.diy_output(f"worker:my_thread_id={dp.my_thread_id},"+\
+                        f"maybe chunk_size=\"{dp.chunk_size}\" is too huge."+\
+                        f"curr_position={curr_position},"+\
+                        f"chunk_data_len={chunk_data_len},"+\
+                        f"dp.curr_end={dp.curr_end},"+\
+                        "curr_position + chunk_data_len > dp.curr_end. " +\
+                        f"Resize chunk data to size={aim_len}.")
                     buffer = io.BytesIO(chunk_data)
                     dp.running_status_tracker = 4
                     chunk_data = buffer.read(aim_len)
@@ -412,13 +419,6 @@ class downloader:
                     dp.running_status_tracker = 5
                     chunk_data_len = len(chunk_data)
                     dp.running_status_tracker = 6
-                    self.diy_output(f"worker:my_thread_id={dp.my_thread_id},"+\
-                        f"chunk_size=\"{dp.chunk_size}\" is too huge."+\
-                        f"curr_position={curr_position},"+\
-                        f"chunk_data_len={chunk_data_len},"+\
-                        f"dp.curr_end={dp.curr_end},"+\
-                        "curr_position + chunk_data_len > dp.curr_end. " +\
-                        f"Resize chunk data to size={chunk_data_len}.")
                     dp.keep_run = False
                 dp.running_status_tracker = 7
                 # 统计已下载的数据大小，单位是字节（byte）
@@ -717,6 +717,7 @@ class downloader:
             return r
         elif self.stream: # 如果服务器不允许通过head请求探测资源大小
             r.close()
+            session = self.get_session_obj()
             r = session.get(url=self.url, allow_redirects=True, verify=self.sni_verify, stream=True)
             it = r.iter_content(chunk_size=8)
             if content_length_exist():
@@ -934,8 +935,8 @@ class downloader:
         return None
 
 if __name__ == "__main__":
-    thread_num = 32
-    specific_ip_address = "1.0.0.0"
+    thread_num = 4
+    specific_ip_address = "1.1.1.0"
     # specific_ip_address = "1.0.0.100"
     # specific_ip_address = None
     sha256_hash_value = None
@@ -947,7 +948,7 @@ if __name__ == "__main__":
     # 128 MiB version
     sha256_hash_value = "45A3AE1D8321E9C99A5AEEA31A2993CF1E384661326C3D238FFAFA2D7451AEDB"
     specific_range = (0,134217728)
-    # url = "https://speed.cloudflare.com/__down?bytes=90"
+    # url = "https://speed.cloudflare.com/__down?bytes=92"
     # sha256_hash_value = None
     # url = "http://127.0.0.1/download/text/123.txt"
     # sha256_hash_value = "3DCCBFEE56F49916C3264C6799174AF2FDDDEE75DD98C9E7EA5DF56C6874F0D7"
@@ -957,6 +958,7 @@ if __name__ == "__main__":
         thread_num=thread_num,
         sha256_hash_value=sha256_hash_value,
         specific_range=specific_range,
+        download_as_file=True,
         allow_print = True )
     down.main()
     
