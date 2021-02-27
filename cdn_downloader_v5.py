@@ -16,6 +16,7 @@ from requests.sessions import HTTPAdapter
 from forced_ip_https_adapter import ForcedIPHTTPSAdapter
 from my_ram_io import LimitedBytearrayIO
 
+from http import HTTPStatus
 # download 线程状态常量
 from my_const import STATUS_INIT
 from my_const import STATUS_READY
@@ -29,9 +30,14 @@ from my_const import STATUS_PAUSE
 from my_const import LEVEL_ENFORCE      # 绝对精准，精准至byte级别
 from my_const import LEVEL_PERMISSIVE   # 宽松，达量即可，允许超量
 
+from my_const import DL_FIRST_BORN
+from my_const import DL_INITIATING
+from my_const import DL_RUNNING
+from my_const import DL_COMPLETE
+from my_const import DL_FAILED
 
 # 最后一次代码修改时间
-__updated__ = "2021-02-26 20:12:05"
+__updated__ = "2021-02-26 23:13:22"
 __version__ = 0.5
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
@@ -88,8 +94,8 @@ class my_thread_lock:
 
 class download_progress:
     def __init__(self,
-        start, 
-        end, 
+        start = 0, 
+        end = 0, 
         my_thread_id:int=0, 
         chunk_size:int=512,
         getsize_strict_level=LEVEL_ENFORCE,
@@ -110,7 +116,7 @@ class download_progress:
         self.duration = 0
         self.running_status_tracker = None
         # 通过 hack 手段强行终止当前任务所需要的context
-        self.request_context = None
+        self.response_context = None
         self.it = None  #request_context.iter_content
         # 控制一个 worker 持续循环接收数据的开关
         self.keep_run = True
@@ -163,7 +169,7 @@ class download_progress:
         self.duration_count_up()
         self.end_time = time.time()
         try:
-            self.request_context.close()
+            self.response_context.close()
         except Exception:
             pass
 
@@ -192,13 +198,13 @@ class downloader:
             url:str, 
             download_as_file:bool=True,
             thread_num:int=4,
-            max_retries:int=3,
-            timeout:float=3,
+            max_retries:int=0,
+            timeout_to_retry:float=3,
             stream:bool=True,
             sni_verify:bool=True,
+            use_watchdog:bool=True,
             sha256_hash_value:str=None,
             specific_ip_address:str=None,
-            use_watchdog:bool=True,
             specific_range:tuple=None,
             **kwargs):
         my_python_version = str(sys.version_info.major) + "." +\
@@ -225,7 +231,7 @@ class downloader:
         # 调度系统检查线程的频率，每多少秒检查一次
         self.schedule_frequent = 1
         # 设置超时时间，超出后立即重试
-        self.timeout = timeout
+        self.timeout_to_retry = timeout_to_retry
         self.max_retries:int = max_retries
         self.stream:bool = stream
         self.sni_verify:bool = sni_verify
@@ -241,6 +247,8 @@ class downloader:
 
         self.kwargs = kwargs
 
+        self.response_with_content_length = None
+        self.download_status = DL_FIRST_BORN
         self.download_tp = None
         self.download_progress_list:list = []
         self.status_running_queue:schedule_queue = \
@@ -316,54 +324,66 @@ class downloader:
             session.mount(prefix="http://", adapter=HTTPAdapter(max_retries=self.max_retries) )
         return session
 
-    def get_new_request(self, dp:download_progress):
+
+
+    def get_new_response(self, dp:download_progress):
         dp.now_init()
-        if (dp.request_context != None):
-            dp.request_context.close()
-            dp.request_context = None
+        if (dp.response_context != None):
+            dp.response_context.close()
+            dp.response_context = None
         headers = {
-            "Range": f"bytes={dp.curr_start}-{dp.curr_end}", 
             "Host": self.hostname, 
             "User-Agent": self.user_agent }
+        if self.stream :
+            headers["Range"]= f"bytes={dp.curr_start}-{dp.curr_end}"
         session = self.get_session_obj()
         my_request = None
         retry_count = 0
-        while dp.keep_get_new_request:
+        while True:
             try:
                 if self.is_https:
                     my_request = session.get(url=self.url, headers=headers, 
-                        stream=self.stream, timeout=self.timeout, verify=self.sni_verify)
+                        stream=self.stream, timeout=self.timeout_to_retry, verify=self.sni_verify)
                 else:
                     if self.specific_ip_address == None :
                         my_request = session.get(url=self.url, headers=headers, 
-                            stream=self.stream, timeout=self.timeout)
+                            stream=self.stream, timeout=self.timeout_to_retry)
                     else:
                         my_request = session.get(url=self.ip_direct_url, headers=headers, 
-                            stream=self.stream, timeout=self.timeout)
-            except (requests.Timeout, requests.ReadTimeout ) :
+                            stream=self.stream, timeout=self.timeout_to_retry)
+                if dp.keep_get_new_request == False:
+                    break
+            except (requests.Timeout, requests.ReadTimeout ) as e :
                 session.close()
-                retry_count = retry_count +1
                 self.diy_output(f"request:my_thread_id={dp.my_thread_id}," + \
-                    f"request time out.Retry count={retry_count * self.max_retries}")
+                    f"request time out.Retry count={retry_count * (self.max_retries +1)}, " +\
+                    "error=", e)
+                if dp.keep_get_new_request == False:
+                    break
+                retry_count = retry_count +1
                 session = self.get_session_obj()
             except Exception as e:
                 session.close()
-                retry_count = retry_count +1
                 self.diy_output(f"request:my_thread_id={dp.my_thread_id}," + \
-                    "unknow error.Retrying...error=",e)
+                    f"unknow error.Retry count={retry_count * (self.max_retries +1)}, " +\
+                    "error=", e)
+                if dp.keep_get_new_request == False:
+                    break
+                retry_count = retry_count +1
                 session = self.get_session_obj()
             else:
                 break
-        dp.request_context = my_request
-        if (dp.chunk_size == 0):
-            dp.it = dp.request_context.iter_content()
-        else:
-            dp.it = dp.request_context.iter_content( chunk_size=dp.chunk_size )
+        dp.response_context = my_request
+        if self.stream :
+            if (dp.chunk_size == 0):
+                dp.it = dp.response_context.iter_content()
+            else:
+                dp.it = dp.response_context.iter_content( chunk_size=dp.chunk_size )
         dp.now_ready()
 
     # 下载文件的核心函数
     def download(self, dp:download_progress):
-        self.get_new_request(dp=dp)
+        self.get_new_response(dp=dp)
         is_enforce_mode:bool = True
         if dp.getsize_strict_level != LEVEL_ENFORCE:
             is_enforce_mode = False
@@ -447,7 +467,7 @@ class downloader:
                     dp.running_status_tracker = 16
                     self.chunk_download_retry_init(dp=dp)
                     dp.running_status_tracker = 17
-                    self.get_new_request(dp=dp)
+                    self.get_new_response(dp=dp)
                     dp.running_status_tracker = 18
                     # if self.download_as_file :
                     #     f.seek(dp.curr_start)
@@ -698,7 +718,7 @@ class downloader:
                         f"Retrying...{' '*30}")
 
                     try:
-                        dp.request_context.raw._fp.close()
+                        dp.response_context.raw._fp.close()
                         dp.hack_send_close_signal_count += 1
                     except Exception:
                         pass
@@ -712,7 +732,9 @@ class downloader:
         r = session.head( url=self.url, allow_redirects=True, verify=self.sni_verify)
         headers = r.headers
         def content_length_exist():
-            return (r.status_code == 200 and ("Content-Length" in headers) and headers["Content-Length"])
+            flag = (r.status_code == HTTPStatus.OK.value and \
+                ("Content-Length" in headers) and headers["Content-Length"])
+            return flag
         if content_length_exist():
             return r
         elif self.stream: # 如果服务器不允许通过head请求探测资源大小
@@ -722,6 +744,8 @@ class downloader:
             it = r.iter_content(chunk_size=8)
             if content_length_exist():
                 return r
+        # raise ValueError("unsupport response type.\"Content-Length\" is needed.")
+        self.diy_output("unsupport response type.\"Content-Length\" is needed.")
         return None
 
     def download_range_init(self, origin_size:int)->bool:
@@ -751,6 +775,7 @@ class downloader:
         start_time = time.time()
         # 从回复数据获取文件大小
         r = self.get_response_with_content_length()
+        self.response_with_content_length = r
         took_time = "%.3f"%(time.time()-start_time)
         self.diy_output("Took {} seconds.".format(took_time) )
         if r == None:
@@ -787,7 +812,6 @@ class downloader:
         self.diy_output("File space allocated.")
         return True
 
-
     def compute_sha256_hash(self)->str:
         file_data = None
         if self.download_as_file :
@@ -802,14 +826,19 @@ class downloader:
 
     def main(self)->bool:
         # self.diy_output("Download mission overview:")
+        if self.stream == False:
+            self.just_get()
+            return True
+        self.download_status = DL_INITIATING
         if not self.download_init():
+            self.download_status = DL_FAILED
             return False
         self.diy_output("Starting download...")
-
         self.download_tp = ThreadPoolExecutor(max_workers=self.thread_num)
         start = self.specific_range[0]
         total_workload = self.specific_range[1] - self.specific_range[0]
         part_size = int(total_workload / self.thread_num)
+        self.download_status = DL_RUNNING
         start_time = time.time()
         for i in range(self.thread_num):
             if(i+1 == self.thread_num):
@@ -836,7 +865,6 @@ class downloader:
         # self.download_monitor_str()
         end_time = time.time()
         self.download_tp.shutdown()
-        
         total_time = end_time - start_time
         average_speed = self.get_humanize_size(size_in_byte = self.total_workload/total_time )
         self.diy_output(f"total-time: {total_time:.3f}s | average-speed: {average_speed}/s")
@@ -846,15 +874,18 @@ class downloader:
             hash_value = self.compute_sha256_hash()
             self.diy_output("Compute sha256 hash value is :" + hash_value)
             if (hash_value == self.sha256_hash_value):
+                self.download_status = DL_COMPLETE
                 self.diy_output("Hash matched!")
             else:
+                self.download_status = DL_FAILED
                 self.diy_output("Hash not match.Maybe file is broken.")
         else:
+            self.download_status = DL_COMPLETE
             self.diy_output("Compute sha256 hash value is :" + self.compute_sha256_hash())
         return True
 
     def speedtest_download(self, dp:download_progress):
-        self.get_new_request(dp=dp)
+        self.get_new_response(dp=dp)
         def is_not_finished()->bool:
             return (dp.curr_start + dp.curr_getsize -1 != dp.curr_end)
         with open(self.full_path_to_file, "rb+") as f:
@@ -905,7 +936,7 @@ class downloader:
             continue
         time.sleep(timeout_to_stop)
         if (dp.downloader_thread_status == STATUS_RUNNING):
-            dp.request_context.raw._fp.close()
+            dp.response_context.raw._fp.close()
 
     def speedtest_single_thread(self, timeout_to_stop):
         if not self.download_init():
@@ -927,16 +958,31 @@ class downloader:
         sc_thread.start()
         speedtest_thread = threading.Thread(
             target=self.speedtest_download,
-            args=[ dp ],
-            daemon=True)
+            args=[ dp ], daemon=True)
         speedtest_thread.start()
         # self.speedtest_download(dp)
         speedtest_thread.join()
         return None
 
+    def just_get(self, timeout_to_stop = None)->Response:
+        self.download_status = DL_INITIATING
+        self.stream = False
+        if timeout_to_stop != None:
+            self.timeout_to_retry = timeout_to_stop
+        dp = download_progress()
+        dp.keep_get_new_request = False
+        self.download_progress_list = [ dp ]
+        self.download_status = DL_RUNNING
+        self.get_new_response(dp=dp)
+        if dp.response_context == None:
+            self.download_status = DL_FAILED
+        else:
+            self.download_status = DL_COMPLETE
+        return dp.response_context
+
 if __name__ == "__main__":
-    thread_num = 4
-    specific_ip_address = "1.1.1.0"
+    thread_num = 32
+    specific_ip_address = "1.0.0.0"
     # specific_ip_address = "1.0.0.100"
     # specific_ip_address = None
     sha256_hash_value = None
@@ -958,7 +1004,7 @@ if __name__ == "__main__":
         thread_num=thread_num,
         sha256_hash_value=sha256_hash_value,
         specific_range=specific_range,
-        download_as_file=True,
+        download_as_file=False,
         allow_print = True )
     down.main()
     

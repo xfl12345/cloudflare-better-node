@@ -6,6 +6,15 @@ STATUS_WORK_FINISHED = 3
 STATUS_EXIT = 4
 STATUS_FORCE_EXIT = 5
 STATUS_PAUSE = 6
+
 # 对 download 过程中的 getsize 约束程度
-LEVEL_ENFORCE = 0     # 绝对精准，精准至byte级别
-LEVEL_PERMISSIVE = 1  # 宽松，达量即可，允许超量
+LEVEL_ENFORCE = 10     # 绝对精准，精准至byte级别
+LEVEL_PERMISSIVE = 11  # 宽松，达量即可，允许超量
+
+# downloader 任务状态
+DL_FIRST_BORN = 20
+DL_INITIATING = 21
+DL_RUNNING = 22
+DL_COMPLETE = 23
+DL_FAILED = 29
+

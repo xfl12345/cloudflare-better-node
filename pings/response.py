@@ -16,6 +16,7 @@ class Response():
         self.avg_rtt = None
         self.ret_code = None
         self.messages = []
+        self.debug_messages = []
 
         self.packet_data_size = None
         self.ttl = None

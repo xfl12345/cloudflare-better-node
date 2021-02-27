@@ -8,7 +8,7 @@ import time
 from .response import Response
 from .consts import SUCCESS, FAILED
 
-__updated__ = "2021-02-25 11:09:56"
+__updated__ = "2021-02-27 19:44:31"
 
 # source code URL: https://github.com/satoshi03/pings/blob/master/pings/ping.py
 
@@ -20,7 +20,14 @@ else:
 
 class Ping():
 
-    def __init__(self, timeout=1000, packet_data_size=55, own_id=None, udp=False, bind=None, quiet=True):
+    def __init__(self, 
+            timeout=1000, 
+            max_wait=1000,
+            packet_data_size=55, 
+            own_id=None, 
+            udp=False, 
+            bind=None, 
+            quiet=True):
         self.timeout = timeout
         self.packet_data_size = packet_data_size
         self.own_id = own_id
@@ -31,7 +38,7 @@ class Ping():
         if own_id is None:
             self.own_id = os.getpid() & 0xFFFF
 
-        self.max_wait = 1000 # ms
+        self.max_wait = max_wait # ms
         self.seq_number = 0
 
         # self.icmp_echo_reply = 0
@@ -215,7 +222,7 @@ class Ping():
                 response.ret_code = Ping.FAILED
                 return response
 
-            receive_time, packet_data_size, ip, ip_header, icmp_header = self.receive(my_socket)
+            receive_time, packet_data_size, ip, ip_header, icmp_header = self.receive(my_socket, response.debug_messages)
             my_socket.close()
             delay = self._calc_delay(send_time, receive_time)
 
@@ -319,47 +326,53 @@ class Ping():
         return send_time
 
 
-    def receive(self, my_socket):
+    def receive(self, my_socket, debug_messages=None):
         """
         receive icmp packet from a host where packet was sent.
         Returns receive time that is time of packet received, packet size, ip address,
         ip header and icmp header both are formatted in dict.
         If falied to receive packet, returns 0 and None
-
-        According to RFC 791 - Internet Protocol Version 4
-        The struct of IPv4 packet:
-        Internet Header Length (4bits),
-        Type of Service (8bits),
-        Total Length (16bits),
-        Identification (16bits),
-        Flags (3bits),
-        Fragment Offset (13bits),
-        Time To Live (8bits), 
-        Protocol (8bits),
-        Header checksum (16bits),
-        Source Address (32bits),
-        Destination Address (32bits),
-        Options (Variable) Padding (0-24bits)
-        So.The IPv4 packet header length is (4+8+16+16+3+13+8+8+16+32+32)/8 = 20 bytes
-        According to RFC 792 - Internet Control Message Protocol 
-        The struct of ICMP packet:
-        Type (8bits), Code (8bits), Checksum (16bits), ...anything else... (32bits),
-                        Internet Header + 64 bits of Original Data Datagram
-        So.The ICMP packet header length is (8+8+16+32)/8 = 8 bytes
-        Generally,a ICMP over IPv4 packet's data length = len(packet) - (20+8)
         """
         timeout = self.timeout / 1000
         while True:
             select_start = timer()
+            # inputready, outputready, exceptready = select.select([my_socket], [], [] )
             inputready, outputready, exceptready = select.select([my_socket], [], [], timeout)
+
             select_duration = (timer() - select_start)
             if inputready == []:
+                if debug_messages != None:
+                    debug_messages.append(f"inputready == []")
                 return 0, 0, 0, None, None
 
             packet, address = my_socket.recvfrom(self.icmp_max_recv)
             icmp_header = self._parse_icmp_header(packet)
 
             receive_time = timer()
+
+            """
+            According to RFC 791 - Internet Protocol Version 4
+            The struct of IPv4 packet:
+            Internet Header Length (4bits),
+            Type of Service (8bits),
+            Total Length (16bits),
+            Identification (16bits),
+            Flags (3bits),
+            Fragment Offset (13bits),
+            Time To Live (8bits), 
+            Protocol (8bits),
+            Header checksum (16bits),
+            Source Address (32bits),
+            Destination Address (32bits),
+            Options (Variable) Padding (0-24bits)
+            So.The IPv4 packet header length is (4+8+16+16+3+13+8+8+16+32+32)/8 = 20 bytes
+            According to RFC 792 - Internet Control Message Protocol 
+            The struct of ICMP packet:
+            Type (8bits), Code (8bits), Checksum (16bits), ...anything else... (32bits),
+                            Internet Header + 64 bits of Original Data Datagram
+            So.The ICMP packet header length is (8+8+16+32)/8 = 8 bytes
+            Generally,a ICMP over IPv4 packet's data length = len(packet) - (20+8)
+            """
 
             if icmp_header["packet_id"] == self.own_id: # my packet
                 ip_header = self._parse_ip_header(packet)
@@ -370,4 +383,6 @@ class Ping():
             timeout = timeout - select_duration
 
             if timeout <= 0:
+                if debug_messages != None:
+                    debug_messages.append("timeout <= 0")
                 return 0, 0, 0, None, None
