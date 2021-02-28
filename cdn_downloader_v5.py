@@ -37,7 +37,7 @@ from my_const import DL_COMPLETE
 from my_const import DL_FAILED
 
 # 最后一次代码修改时间
-__updated__ = "2021-02-26 23:13:22"
+__updated__ = "2021-02-28 15:47:18"
 __version__ = 0.5
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
@@ -323,8 +323,6 @@ class downloader:
         else:
             session.mount(prefix="http://", adapter=HTTPAdapter(max_retries=self.max_retries) )
         return session
-
-
 
     def get_new_response(self, dp:download_progress):
         dp.now_init()
@@ -799,6 +797,8 @@ class downloader:
         self.diy_output("Download file size={}".format(self.get_humanize_size(self.total_workload)))
         self.diy_output("File space allocating...")
         start_time = time.time()
+        if not os.path.exists(self.storage_root):
+            os.makedirs(self.storage_root)
         if self.download_as_file:
             # 优先创建 size 大小的占位文件
             f = open(self.full_path_to_file, "wb")

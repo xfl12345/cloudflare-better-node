@@ -8,6 +8,7 @@ conf/
 
 # my dev version files
 no_upload/
+result/
 
 # visual studio code files
 .vscode/
