@@ -1,630 +1,1003 @@
-import re
+import copy
+import hashlib
+import io
 import os
+import queue
+import re
+import requests
 import sys
 import time
-import json
-import ipaddress
-import multiprocessing as mp
-import multiprocessing.connection as mpc
+import typing
+import threading
 
+from concurrent.futures import ThreadPoolExecutor
+from urllib import parse
+from requests.models import Response
+from requests.sessions import HTTPAdapter
 from forced_ip_https_adapter import ForcedIPHTTPSAdapter
-from cdn_downloader_v5 import downloader
-from cdn_downloader_v5 import download_progress
-from mpc_ping import simple_mpc_ping
+from my_ram_io import LimitedBytearrayIO
+from diy_thread_lock import my_thread_lock
 
-import pings
-import my_const
+from http import HTTPStatus
+# download 线程状态常量
+from my_const import STATUS_INIT
+from my_const import STATUS_READY
+from my_const import STATUS_RUNNING
+from my_const import STATUS_WORK_FINISHED
+from my_const import STATUS_EXIT
+from my_const import STATUS_FORCE_EXIT
+from my_const import STATUS_PAUSE
 
+# 对 download 过程中的 getsize 约束程度
+from my_const import LEVEL_ENFORCE      # 绝对精准，精准至byte级别
+from my_const import LEVEL_PERMISSIVE   # 宽松，达量即可，允许超量
 
-
+from my_const import DL_FIRST_BORN
+from my_const import DL_INITIATING
+from my_const import DL_RUNNING
+from my_const import DL_COMPLETE
+from my_const import DL_FAILED
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-02 00:10:28"
-__version__ = 0.1
+__updated__ = "2021-03-02 00:48:40"
+__version__ = 0.5
 
-class cloudflare_cdn_tool_utils:
-    ipv4_list_url = "https://www.cloudflare.com/ips-v4"
-    ipv6_list_url = "https://www.cloudflare.com/ips-v6"
-    PATTERN_GET_NETWORK_ADDRESS = r"(((1\d\d|2[0-4]\d|25[0-5]|[1-9]\d|\d)\.){3}(1\d\d|2[0-4]\d|25[0-5]|[1-9]\d|\d)/([12]\d|3[012]|\d))"
+# source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
 
-    file_root = "result/"
-    simple_get_best_network_latest_result_filename = "latest_result.json"
-    simple_get_best_network_latest_blackwhitelist_filename = "latest_blackwhitelist.json"
+class download_progress:
+    def __init__(self,
+        start = 0, 
+        end = 0, 
+        my_thread_id:int=0, 
+        chunk_size:int=512,
+        getsize_strict_level=LEVEL_ENFORCE,
+        **kwargs):
+        self.chunk_size = chunk_size
+        self.getsize_strict_level = getsize_strict_level
+        # worker 最开始分配任务的起始和终点
+        self.init_start = start
+        self.init_end = end
+        # start,end,getsize 仅仅表示当前任务状态
+        # start: 起始下载位置，end: 终点下载位置
+        # getsize: 当前任务的累计下载大小
+        self.curr_start = start
+        self.curr_end = end
+        self.curr_getsize = 0
+        self.start_time = 0
+        self.end_time = 0
+        self.duration = 0
+        self.running_status_tracker = None
+        # 通过 hack 手段强行终止当前任务所需要的context
+        self.response_context = None
+        self.it = None  #request_context.iter_content
+        # 控制一个 worker 持续循环接收数据的开关
+        self.keep_run = True
+        # TODO: 实现暂停功能
+        # 使 worker 陷入暂停
+        self.need_pause = False
+        self.my_lock = my_thread_lock()
+        # 是否不断坚持发起请求
+        self.keep_get_new_request = True
+        # 一个worker固有属性
+        self.my_thread_id = my_thread_id
+        # 统计这个worker重新发起请求的次数
+        self.retry_count = 0
+        # watchdog看门狗通过hack手段终结request的次数
+        self.hack_send_close_signal_count = 0
+        # 给watchdog看门狗看家的必要数据
+        self.history_getsize = 0
+        self.last_check_time = 0
+        # 千真万确的实际累计下载大小
+        self.history_done_size = 0
+        # 这个worker目前的工作状态
+        self.downloader_thread_status = STATUS_INIT
+        self.my_future = None
 
+    def duration_count_up(self):
+        self.duration += time.time() - self.start_time
 
-    def __init__(self, 
-            allow_print:bool=False, 
-            prefer_use_local_blackwhitelist:bool=True):
-        self.allow_print:bool = allow_print
-        self.prefer_use_local_blackwhitelist:bool=prefer_use_local_blackwhitelist
+    def is_need_to_pause(self):
+        if self.need_pause:
+            self.duration_count_up()
+            self.my_lock.block_myself()
+            self.start_time = time.time()
 
-    # def clear_result(self):
-    #     pass
+    def get_curr_workload(self):
+        return self.curr_end - self.curr_start +1
+
+    def now_init(self):
+        self.downloader_thread_status = STATUS_INIT
     
+    def now_ready(self):
+        self.downloader_thread_status = STATUS_READY
+
+    def now_running(self):
+        self.start_time = time.time()
+        self.last_check_time = time.time()
+        self.downloader_thread_status = STATUS_RUNNING
+
+    def now_work_finished(self):
+        self.downloader_thread_status = STATUS_WORK_FINISHED
+        self.duration_count_up()
+        self.end_time = time.time()
+        try:
+            self.response_context.close()
+        except Exception:
+            pass
+
+    def now_exit(self):
+        self.downloader_thread_status = STATUS_EXIT
+
+    def now_force_exit(self):
+        self.duration_count_up()
+        self.downloader_thread_status = STATUS_FORCE_EXIT
+
+class schedule_queue:
+    def __init__(self, 
+            dp_status):
+        self.dp_status = dp_status
+        self.queue:queue.Queue = queue.Queue()
+        self.lock = my_thread_lock()
+
+# class downloader_param:
+#     def __init__(self, 
+#             url:str, 
+#             download_as_file:bool=True,
+#             thread_num:int=4,
+#             max_retries:int=0,
+#             timeout_to_retry:float=3,
+#             stream:bool=True,
+#             sni_verify:bool=True,
+#             use_watchdog:bool=True,
+#             sha256_hash_value:str=None,
+#             specific_ip_address:str=None,
+#             specific_range:tuple=None,
+#             **kwargs):
+        
+#         self.url:str = url
+#         self.download_as_file:bool=download_as_file
+#         self.thread_num:int=thread_num
+#         self.max_retries:int=max_retries
+#         self.timeout_to_retry:float=timeout_to_retry
+#         self.stream:bool=stream
+#         self.sni_verify:bool=sni_verify
+#         self.use_watchdog:bool=use_watchdog
+#         self.sha256_hash_value:str=sha256_hash_value
+#         self.specific_ip_address:str=specific_ip_address
+#         self.specific_range:tuple=specific_range
+#         self.kwargs = kwargs
+
+# source code URL: https://blog.csdn.net/qq_42951560/article/details/108785802
+class downloader:
+    ONE_OF_1024:float = 0.0009765625 # 1/1024
+    default_filename:str = "url_did_not_provide_filename"
+    """
+    specific_range 要求传入的是一个长度为 2 的Tuple元组，包含(start_from, end_at)两个参数
+    """
+    def __init__(self, 
+            url:str, 
+            download_as_file:bool=True,
+            thread_num:int=4,
+            max_retries:int=0,
+            timeout_to_retry:float=3,
+            stream:bool=True,
+            sni_verify:bool=True,
+            use_watchdog:bool=True,
+            sha256_hash_value:str=None,
+            specific_ip_address:str=None,
+            specific_range:tuple=None,
+            **kwargs):
+        my_python_version = str(sys.version_info.major) + "." +\
+                    str(sys.version_info.minor) + "." +\
+                    str(sys.version_info.micro) # + "_" +\
+                    # str(sys.version_info.releaselevel) + "_" +\
+                    # str(sys.version_info.serial)
+        self.user_agent = "Python/" + my_python_version + " " +\
+            "python_requests/" + str(requests.__version__) + " " +\
+            f"cloudflare-better-node/{__version__} (github.com@xfl12345) "
+        self.url:str = url
+        self.download_to_ram = bytearray()
+        self.filename:str = self.default_filename 
+        self.storage_root:str = "downloads/"
+        self.download_as_file:bool = download_as_file
+        if self.download_as_file :
+            if "filename" in kwargs:
+                self.filename:str = str(kwargs.pop("filename"))
+            if "storage_root" in kwargs:
+                self.storage_root:str = str(kwargs.pop("storage_root"))
+        self.full_path_to_file:str = self.storage_root + self.filename
+        # 看门狗检查线程的频率，每多少秒检查一次
+        self.watchdog_frequent = 5
+        # 调度系统检查线程的频率，每多少秒检查一次
+        self.schedule_frequent = 1
+        # 设置超时时间，超出后立即重试
+        self.timeout_to_retry = timeout_to_retry
+        self.max_retries:int = max_retries
+        self.stream:bool = stream
+        self.sni_verify:bool = sni_verify
+        self.thread_num:int = thread_num
+        self.sha256_hash_value = None
+        self.specific_ip_address = specific_ip_address
+        self.use_watchdog:bool = use_watchdog
+        self.specific_range:tuple = specific_range
+        self.allow_print:bool = True
+        self.watchdog_lock = my_thread_lock()
+
+        if "allow_print" in kwargs:
+            self.allow_print = bool(kwargs.pop("allow_print"))
+
+        self.kwargs = kwargs
+
+        self.response_with_content_length = None
+        self.download_status = DL_FIRST_BORN
+        self.download_tp = None
+        self.download_progress_list:list = []
+        self.status_running_queue:schedule_queue = \
+            schedule_queue(dp_status=STATUS_RUNNING)
+        self.status_exit_queue:schedule_queue = \
+            schedule_queue(dp_status=STATUS_EXIT)
+        self.status_force_exit_queue:schedule_queue = \
+            schedule_queue(dp_status=STATUS_FORCE_EXIT)
+        self.status_pause_queue:schedule_queue = \
+            schedule_queue(dp_status=STATUS_PAUSE)
+        self.status_other_queue:schedule_queue = \
+            schedule_queue(dp_status=None)
+
+        self.download_finished:bool = False
+
+        if (sha256_hash_value != None):
+            self.sha256_hash_value = sha256_hash_value.upper()
+        if not os.path.exists(self.storage_root):
+            os.makedirs(self.storage_root)
+        
+
     def diy_output(self,*objects, sep=' ', end='\n', file=sys.stdout, flush=False):
         if self.allow_print:
             print(*objects, sep=sep, end=end, file=file, flush=flush)
 
-    def read_json_file(self, filename:str ):
-        full_path_to_file = self.file_root + filename
-        obj = None
+    #source code URL:https://blog.csdn.net/mbh12333/article/details/103721834
+    def get_file_name(self,url:str, response:Response)->str:
+        filename = ''
+        if response == None:
+            self.response_with_content_length = self.get_response_with_content_length()
+            response = self.response_with_content_length
+        headers = response.headers
+        if 'Content-Disposition' in headers and headers['Content-Disposition']:
+            disposition_split = headers['Content-Disposition'].split(';')
+            if len(disposition_split) > 1:
+                if disposition_split[1].strip().lower().startswith('filename='):
+                    file_name = disposition_split[1].split('=')
+                    if len(file_name) > 1:
+                        filename = parse.unquote(file_name[1])
+        if not filename and os.path.basename(url):
+            filename = os.path.basename(url).split("?")[0]
+        if not filename:
+            return str(time.time())
+        return filename
 
-        if not os.path.exists(self.file_root) or \
-            not os.path.exists(full_path_to_file):
-            return obj
-        
-        with open(full_path_to_file, "r", encoding='utf-8') as f:
-            obj = json.loads(f.read())
-        return obj
+    def chunk_download_retry_init(self,dp:download_progress):
+        part_of_done_size = int(dp.curr_getsize * 0.9)
+        dp.history_done_size += part_of_done_size
+        dp.curr_start = dp.curr_start + part_of_done_size
+        dp.retry_count += 1
+        dp.curr_getsize = 0
+        dp.history_getsize = 0
+        # dp.keep_run = True
 
-    def write_to_file(self, 
-            filename=None, 
-            curr_local_time=None, 
-            content=None, 
-            suffix:str=None):
-        
-        if not os.path.exists(self.file_root):
-            os.makedirs(self.file_root)
-        
-        if filename == None:
-            if curr_local_time == None:
-                curr_local_time = self.get_curr_local_time()
-            filename = time.strftime("%Y%m%d_%a_%H%M%S", curr_local_time)
-        if suffix != None:
-            filename = filename + "." + suffix
-        filepath = self.file_root + filename
-        f = open(file=filepath,
-                mode="w",
-                encoding="UTF-8")
-        f.write(content)
-        f.close()
-
-    def write_obj_to_json_file(self,
-            filename=None, 
-            curr_local_time=None, 
-            obj=None):
-        
-        content = json.dumps(
-            obj=obj, 
-            ensure_ascii=False, 
-            indent=2 )
-
-        suffix = None
-        if filename != None:
-            head, tail = os.path.splitext(filename)
-            filename = head + ".json"
-        else:
-            suffix = "json"
-
-        self.write_to_file(
-            filename=filename,
-            curr_local_time=curr_local_time,
-            content=content, 
-            suffix=suffix
-        )
-
-    def get_ipv4_netwrok_list(self, 
-            specific_ip_address:str="1.1.1.100" ):
-        pattern = re.compile(self.PATTERN_GET_NETWORK_ADDRESS)
-        if self.prefer_use_local_blackwhitelist:
-            obj = self.read_json_file(
-                filename=self.simple_get_best_network_latest_blackwhitelist_filename
-            )
-            netwrok_list = []
-            if obj != None and isinstance(obj, list) and len(obj) == 2 and \
-                    isinstance(obj[1], list) :
-                for item in obj[1]:
-                    if isinstance(item, str):
-                        ip_addr_iter = pattern.finditer(item)
-                        for i in ip_addr_iter:
-                            netwrok_list.append(i.group(0))
-                return netwrok_list
-
-        down = downloader(
-            url=self.ipv4_list_url, 
-            download_as_file=False,
-            specific_ip_address=specific_ip_address,
-            stream = False,
-            allow_print=self.allow_print
-        )
-        r = down.just_get()
-        if r == None:
-            del down
-            return None
-        cf_network_address_iter = pattern.finditer(r.text)
-        r.close()
-        return [i.group(0) for i in cf_network_address_iter]
-  
-    def get_ipv4_netwrok_nearby_endprefix(self, 
-            prefix:int, 
-            deep_level:int=my_const.SCAN_NORMAL)->int:
-        def normal_or_default():
-            a = (int(prefix / 4) + 1) *4
-            if a > 32:
-                return 32
-            return a
-        if deep_level == my_const.SCAN_NORMAL:
-            return normal_or_default()
-        elif deep_level == my_const.SCAN_MORE_DEEPER:
-            if prefix < 8:
-                return 16
-            elif prefix < 16:
-                return 24
+    def get_session_obj(self)->requests.Session:
+        session = requests.Session()
+        if self.is_https:
+            if self.specific_ip_address == None :
+                session.mount(prefix="https://", adapter=ForcedIPHTTPSAdapter(max_retries=self.max_retries) )
             else:
-                return 32
-        elif deep_level == my_const.SCAN_DEEPEST:
-            return 32
+                session.mount(prefix="https://" , adapter=ForcedIPHTTPSAdapter(max_retries=self.max_retries, dest_ip=self.specific_ip_address))
         else:
-            return normal_or_default()
+            session.mount(prefix="http://", adapter=HTTPAdapter(max_retries=self.max_retries) )
+        return session
 
-    def dict_mover(self, src:dict, dest:dict):
+    def get_new_response(self, dp:download_progress):
+        dp.now_init()
+        if (dp.response_context != None):
+            dp.response_context.close()
+            dp.response_context = None
+        headers = {
+            "Host": self.hostname, 
+            "User-Agent": self.user_agent }
+        if self.stream :
+            headers["Range"]= f"bytes={dp.curr_start}-{dp.curr_end}"
+        session = self.get_session_obj()
+        my_request = None
+        retry_count = 0
         while True:
             try:
-                k,v = src.popitem()
-                dest[k] = v
-            except KeyError:
-                break
-
-    def get_curr_local_time_str(self, curr_local_time:time.struct_time):
-        return time.strftime("TZ(%z)_Y(%Y)-M(%m)-D(%d)_%A_%H:%M:%S", curr_local_time)
-
-    def get_curr_local_time(self)->time.struct_time:
-        return time.localtime()
-
-    def ping_scan_ipv4_subnetwork(self, 
-            network_obj:ipaddress.IPv4Network, 
-            end_prefixlen=None, 
-            ping_times:int=16,
-            wirte_to_file:bool=False, 
-            violence_mode:bool=False):
-        if end_prefixlen == None:
-            end_prefixlen = self.get_ipv4_netwrok_nearby_endprefix(network_obj.prefixlen)
-        else:
-            end_prefixlen = int(end_prefixlen)
-        if end_prefixlen < network_obj.prefixlen:
-            raise ValueError(f"end_prefixlen={end_prefixlen}(24 in default) should not " +\
-                f"smaller than network_obj's prefixlen={network_obj.prefixlen}.")
-        sub_network_iter = network_obj.subnets( end_prefixlen - network_obj.prefixlen)
-        self.diy_output("ping_scan_ipv4_subnetwork:Starting ping...")
-        start_time = time.time()
-
-        mp_receiver_list = []
-
-        if violence_mode:
-            p_list = []
-            for item in sub_network_iter:
-                ip_address = str(item.network_address)
-                sender, receiver = mp.Pipe(duplex=True)
-                p = mp.Process(
-                    target=simple_mpc_ping, 
-                    args=(
-                        sender,         #mp_pipe_sender
-                        ip_address,     #ip_address
-                        32,             #packet_data_size
-                        400,            #timeout
-                        0,              #max_wait
-                        ping_times      #times
-                    )
-                )
-                mp_receiver_list.append(receiver)
-                p_list.append(p)
-                p.start()
-            # p_item:mp.Process
-            # for p_item in p_list:
-            #     p_item.join()
-        else:
-            max_task_num = os.cpu_count()
-            if max_task_num != None:
-                max_task_num = max_task_num << 1  # cpu_num = cpu_num *2
-            # p_pool = mp.Pool(maxtasksperchild=max_task_num)
-            p_pool = mp.Pool(processes=max_task_num)
-            p_asyncresult_list = []
-            for item in sub_network_iter:
-                ip_address = str(item.network_address)
-                sender, receiver = mp.Pipe(duplex=True)
-                p = p_pool.apply_async(
-                    func=simple_mpc_ping, 
-                    args=(
-                        sender,         #mp_pipe_sender
-                        ip_address,     #ip_address
-                        32,             #packet_data_size
-                        400,            #timeout
-                        0,              #max_wait
-                        ping_times      #times
-                    )
-                )
-                mp_receiver_list.append(receiver)
-                p_asyncresult_list.append(p)
-            # p_asyncresult:mp.pool.AsyncResult
-            # for p_asyncresult in p_asyncresult_list:
-            #     p_asyncresult.wait()
-
-        curr_local_time = self.get_curr_local_time()
-        curr_local_time_str = self.get_curr_local_time_str(curr_local_time=curr_local_time)
-        ping_task_dict:dict = {
-            "time":curr_local_time_str,
-            "task_detail":{
-                "function":"ping_scan_ipv4_subnetwork",
-                "major_var":{
-                    "network_address":network_obj.with_prefixlen,
-                    "end_prefixlen":end_prefixlen,
-                    "ping_times":ping_times
-                },
-                "duration_in_sec":0
-            },
-            "result":{
-                "count":0,
-                "reachable":{
-                    "count":0, 
-                    "lowest_loss_host":{
-                        "count":0, 
-                        "hosts":{}
-                    },
-                    "normal_host":{
-                        "count":0, 
-                        "hosts":{}
-                    },
-                },
-                "unreachable":{
-                    "count":0, 
-                    "hosts":{}
-                }
-            }
-        }
-        ping_result_dict:dict = ping_task_dict["result"]
-        reachable_dict:dict = ping_result_dict["reachable"]
-        lowest_loss_host_dict:dict = reachable_dict["lowest_loss_host"]
-        normal_host_dict:dict = reachable_dict["normal_host"]
-        unreachable_dict:dict = ping_result_dict["unreachable"]
-        
-        item:mpc.Connection
-        ip_addr:str
-        r:pings.ping.Response
-        low_dict_last_key:str
-        lowest_loss_host_dict["count"] = 0
-        for item in mp_receiver_list:
-            res = dict(item.recv())
-            ip_addr,r = res.popitem()
-            ping_result_dict["count"] += 1
-            # 如果主机可达
-            if r.packet_received != 0:
-                reachable_dict["count"] += 1
-                # 如果 低丢包字典 不为空
-                if lowest_loss_host_dict["count"] > 0: 
-                    # 取出最后一次压入字典的值 并 强制类型为dict
-                    d:dict = lowest_loss_host_dict["hosts"][low_dict_last_key]
-                    # 取出字典里的 packet_loss 的值
-                    dict_packet_loss = int(d["packet_loss"])
-                    if dict_packet_loss >= int(r.packet_loss):
-                        # 如果当前值是目前最小的，则倾倒字典到另一个字典
-                        # 最少丢包的主机 可以不止一个 
-                        if dict_packet_loss > int(r.packet_loss):
-                            self.dict_mover(
-                                src=lowest_loss_host_dict["hosts"],
-                                dest=normal_host_dict["hosts"]
-                            )
-                            normal_host_dict["count"] += lowest_loss_host_dict["count"]
-                            lowest_loss_host_dict["count"] = 0
-                        lowest_loss_host_dict["hosts"][ip_addr] = r.to_dict()
-                        low_dict_last_key = ip_addr
-                        lowest_loss_host_dict["count"] += 1
-                    else:
-                        normal_host_dict["hosts"][ip_addr] = r.to_dict()
-                        normal_host_dict["count"] += 1
-                else: # lowest_loss_host_dict is empty
-                    lowest_loss_host_dict["hosts"][ip_addr] = r.to_dict()
-                    low_dict_last_key = ip_addr
-                    lowest_loss_host_dict["count"] += 1
-            else:
-                unreachable_dict["hosts"][ip_addr] = r.to_dict()
-                unreachable_dict["count"] += 1
-            del ip_addr,r
-        # for item in mp_receiver_list:
-        #     res = dict(item.recv())
-        #     ping_result_dict.update(res)
-        took_time = time.time() - start_time
-        ping_task_dict["task_detail"]["duration_in_sec"] = took_time
-        self.diy_output("Took {} seconds.".format("%.3f"%took_time) )
-        
-        if wirte_to_file:
-            self.write_obj_to_json_file(
-                curr_local_time=curr_local_time,
-                obj=ping_task_dict
-            )
-
-        return ping_task_dict
-
-    def simple_get_best_network(self, 
-            wirte_to_file:bool=True, 
-            get_blackwhitelist:bool=True,
-            network_list:list=None):
-        while network_list == None:
-            network_list = self.get_ipv4_netwrok_list()
-        start_time = time.time()
-        curr_local_time = self.get_curr_local_time()
-        curr_local_time_str = self.get_curr_local_time_str(curr_local_time=curr_local_time)
-        ping_task_dict:dict={
-            "time":curr_local_time_str,
-            "task_detail":{
-                "function":"simple_get_best_network_list",
-                "major_var":{"get_blackwhitelist":get_blackwhitelist},
-                "duration_in_sec":0
-            },
-            "result":{
-                "count":0,
-                "carefully_chosen":{
-                    "count":0, 
-                    "supernet":{
-                        # "network_address":{   #This is fake code
-                        #     "scan_deep":0     # the end_prefixlen
-                        #     "count":0,
-                        #     "subnetwork_address":{"ping_res_dict"}
-                        # },
-                    }
-                },
-                "unreachable":{
-                    "count":0,
-                    "supernet":{}
-                }
-            }
-        }
-        
-        ping_result_dict:dict = ping_task_dict["result"]
-        carefully_chosen_dict:dict = ping_result_dict["carefully_chosen"]
-        unreachable_dict:dict = ping_result_dict["unreachable"]
-        tmp_ping_result:dict
-        curr_network_dict:dict
-        copy_dict:dict
-
-        for network_address in network_list:
-            network_obj = ipaddress.IPv4Network(network_address)
-            tmp_ping_result = self.ping_scan_ipv4_subnetwork(
-                network_obj=network_obj, 
-                ping_times=8, 
-                wirte_to_file=False)
-            
-            is_complete_unreachable = True
-            if tmp_ping_result["result"]["reachable"]["count"] != 0:
-                is_complete_unreachable = False
-
-                # 先把 顶级网络地址 作为 键值 创建出来
-                carefully_chosen_dict["supernet"][network_address] = {}
-                curr_network_dict = carefully_chosen_dict["supernet"][network_address]
-                # 扫描深度（子网深度）
-                curr_network_dict["scan_deep"] = tmp_ping_result["task_detail"]["major_var"]["end_prefixlen"]
-                # 把旗下最优的子网网络ping结果全部照搬
-                copy_dict = tmp_ping_result["result"]["reachable"]["lowest_loss_host"]
-                curr_network_dict["count"] = copy_dict["count"]
-                curr_network_dict["subnetwork_address"]={}
-                self.dict_mover(
-                    src=copy_dict["hosts"],
-                    dest=curr_network_dict["subnetwork_address"]
-                )
-                # 纳入总数
-                carefully_chosen_dict["count"] += copy_dict["count"]
-                ping_result_dict["count"] += copy_dict["count"]
-            
-            # 同样办法处理不可达的网络，此处记录这些信息方便日后统计分析
-            unreachable_dict["supernet"][network_address] = {}
-            curr_network_dict = unreachable_dict["supernet"][network_address]
-            curr_network_dict["is_complete_unreachable"] = is_complete_unreachable
-            curr_network_dict["scan_deep"] = tmp_ping_result["task_detail"]["major_var"]["end_prefixlen"]
-            copy_dict = tmp_ping_result["result"]["unreachable"]
-            curr_network_dict["count"] = copy_dict["count"]
-            curr_network_dict["subnetwork_address"]={}
-            self.dict_mover(
-                src=copy_dict["hosts"],
-                dest=curr_network_dict["subnetwork_address"]
-            )
-            unreachable_dict["count"] += copy_dict["count"]
-            ping_result_dict["count"] += copy_dict["count"]
-
-        took_time = time.time() - start_time
-        ping_task_dict["task_detail"]["duration_in_sec"] = took_time
-        self.diy_output("Took {} seconds.".format("%.3f"%took_time) )
-
-        if wirte_to_file:
-            content = json.dumps(
-                obj=ping_task_dict, 
-                ensure_ascii=False, 
-                indent=2 )
-            self.write_to_file(
-                filename=None,
-                curr_local_time=curr_local_time,
-                content=content,
-                suffix="json")
-            self.write_to_file(
-                filename=self.simple_get_best_network_latest_result_filename,
-                content=content)
-        
-        time.sleep(1)
-
-        if get_blackwhitelist:
-            blacklist = []
-            whitelist = []
-            blackwhitelist = [blacklist, whitelist]
-            supernet_dict:dict = unreachable_dict["supernet"]
-            subnet_addr_dict:dict
-            for supernet in supernet_dict.keys():
-                if bool(supernet_dict[supernet]["is_complete_unreachable"]):
-                    blacklist.append(supernet)
+                if self.is_https:
+                    my_request = session.get(url=self.url, headers=headers, 
+                        stream=self.stream, timeout=self.timeout_to_retry, verify=self.sni_verify)
                 else:
-                    subnet_addr_dict:dict = supernet_dict[supernet]["subnetwork_address"]
-                    for subnetwork_address in subnet_addr_dict.keys():
-                        network_address_with_prefix = subnetwork_address + \
-                                        "/" + str(supernet_dict[supernet]["scan_deep"])
-                        blacklist.append(network_address_with_prefix)
-            
-            supernet_dict = carefully_chosen_dict["supernet"]
-            for supernet in supernet_dict.keys():
-                subnet_addr_dict = supernet_dict[supernet]["subnetwork_address"]
-                for subnetwork_address in subnet_addr_dict.keys():
-                    network_address_with_prefix = subnetwork_address + \
-                                    "/" + str(supernet_dict[supernet]["scan_deep"])
-                    whitelist.append(network_address_with_prefix)
-            
-            if wirte_to_file:
-                content = json.dumps(
-                    obj=blackwhitelist, 
-                    ensure_ascii=False, 
-                    indent=2 )
-                self.write_to_file(
-                    curr_local_time=curr_local_time,
-                    content=content,
-                    suffix="json")
-                self.write_to_file(
-                    filename=self.simple_get_best_network_latest_blackwhitelist_filename,
-                    content=content)
-            return blackwhitelist
+                    if self.specific_ip_address == None :
+                        my_request = session.get(url=self.url, headers=headers, 
+                            stream=self.stream, timeout=self.timeout_to_retry)
+                    else:
+                        my_request = session.get(url=self.ip_direct_url, headers=headers, 
+                            stream=self.stream, timeout=self.timeout_to_retry)
+                if dp.keep_get_new_request == False:
+                    break
+            except (requests.Timeout, requests.ReadTimeout ) as e :
+                session.close()
+                self.diy_output(f"request:my_thread_id={dp.my_thread_id}," + \
+                    f"request time out.Retry count={retry_count * (self.max_retries +1)}, " +\
+                    "error=", e)
+                if dp.keep_get_new_request == False:
+                    break
+                retry_count = retry_count +1
+                session = self.get_session_obj()
+            except Exception as e:
+                session.close()
+                self.diy_output(f"request:my_thread_id={dp.my_thread_id}," + \
+                    f"unknow error.Retry count={retry_count * (self.max_retries +1)}, " +\
+                    "error=", e)
+                if dp.keep_get_new_request == False:
+                    break
+                retry_count = retry_count +1
+                session = self.get_session_obj()
+            else:
+                break
+        dp.response_context = my_request
+        if self.stream :
+            if (dp.chunk_size == 0):
+                dp.it = dp.response_context.iter_content()
+            else:
+                dp.it = dp.response_context.iter_content( chunk_size=dp.chunk_size )
+        dp.now_ready()
 
-        return ping_task_dict
+    def get_file_io(self):
+        f = None
+        if self.download_as_file :
+            f = open(self.full_path_to_file, "rb+")
+        else:
+            f = LimitedBytearrayIO(self.download_to_ram)
+        return f
 
-    def iteration_get_best_network(self, 
-            wirte_to_file:bool=True, 
-            get_blackwhitelist:bool=True, 
-            iterate_times:int=1):
-        res = None
-        for i in range(iterate_times):
-            res = self.simple_get_best_network(
-                wirte_to_file=wirte_to_file,
-                get_blackwhitelist=get_blackwhitelist
-            )
-        return res
 
-class cloudflare_cdn_speedtest:
-    """
-    specific_range 要求传入的是一个长度为 2 的Tuple元组，包含(start_from, end_at)两个参数
-    和 downloader 的 specific_range 参数相同
-    """
-    def __init__(self, 
-            url:str, 
-            download_as_file:bool=False,
-            specific_range:tuple=None,
-            timeout_to_stop=10,  # int in second 
-            allow_print:bool=False ):
-        self.url:str = url
-        self.download_as_file:bool = download_as_file
-        self.specific_range = specific_range
-        
-        self.timeout_to_stop = timeout_to_stop
-        self.tool_utils = cloudflare_cdn_tool_utils(
-            allow_print=allow_print
-        )
-        self.diy_output = self.tool_utils.diy_output
+    # 下载文件的核心函数
+    def download(self, dp:download_progress):
+        self.get_new_response(dp=dp)
+        is_enforce_mode:bool = True
+        if dp.getsize_strict_level != LEVEL_ENFORCE:
+            is_enforce_mode = False
+        f = self.get_file_io()
+        f.seek(dp.curr_start)
+        # def save_data(data_in_bytearray, curr_pos):
+        #     if self.download_as_file :
+        #         f.write(data_in_bytearray)
+        #     else:
+        #         end = curr_pos + len(data_in_bytearray)
+        #         f[curr_pos:end] = data_in_bytearray
+        def is_not_finished()->bool:
+            if is_enforce_mode:
+                return (dp.curr_start + dp.curr_getsize -1 != dp.curr_end)
+            else:
+                return (dp.curr_start + dp.curr_getsize -1 <  dp.curr_end )
 
-    def get_download_obj(self):
-        return downloader(
-            url=self.url,
-            specific_range=self.specific_range,
-            download_as_file=self.download_as_file,
-            allow_print=False 
-        )
+        dp.now_running()
+        while dp.keep_run and is_not_finished():
+            dp.is_need_to_pause()
+            dp.running_status_tracker = 0
+            try:
+                chunk_data = next(dp.it)
+                dp.running_status_tracker = 1
+                chunk_data_len = len(chunk_data)
+                curr_position = dp.curr_start + dp.curr_getsize
+                dp.running_status_tracker = 2
 
-    def just_speedtest(self, specific_ip_address:str):
-        down = self.get_download_obj()
-        down.specific_ip_address = specific_ip_address
-        down.speedtest_single_thread(timeout_to_stop=self.timeout_to_stop)
-        dp:download_progress = down.download_progress_list[0]
-        total_size = dp.curr_getsize
+                # For test
+                # if dp.curr_getsize > 30000 and dp.curr_getsize < 40000:
+                #     break
+
+                if is_enforce_mode and (curr_position + chunk_data_len -1 > dp.curr_end):
+                    dp.running_status_tracker = 3
+                    aim_len = dp.curr_end - curr_position +1
+                    self.diy_output(f"worker:my_thread_id={dp.my_thread_id},"+\
+                        f"maybe chunk_size=\"{dp.chunk_size}\" is too huge."+\
+                        f"curr_position={curr_position},"+\
+                        f"chunk_data_len={chunk_data_len},"+\
+                        f"dp.curr_end={dp.curr_end},"+\
+                        "curr_position + chunk_data_len > dp.curr_end. " +\
+                        f"Resize chunk data to size={aim_len}.")
+                    buffer = io.BytesIO(chunk_data)
+                    dp.running_status_tracker = 4
+                    chunk_data = buffer.read(aim_len)
+                    buffer.close()
+                    dp.running_status_tracker = 5
+                    chunk_data_len = len(chunk_data)
+                    dp.running_status_tracker = 6
+                    dp.keep_run = False
+                dp.running_status_tracker = 7
+                # 统计已下载的数据大小，单位是字节（byte）
+                dp.curr_getsize += chunk_data_len
+                dp.running_status_tracker = 8
+                # save_data(chunk_data, curr_position)
+                f.write(chunk_data)
+                dp.running_status_tracker = 9
+                # f.flush()
+            except StopIteration:
+                dp.running_status_tracker = 10
+                dp.it.close()
+                dp.running_status_tracker = 11
+                break
+            except requests.ConnectionError as e:
+                dp.running_status_tracker = 12
+                self.diy_output(f"worker:my_thread_id={dp.my_thread_id},known error=",e)
+                if( dp.keep_run and is_not_finished() ):
+                    dp.running_status_tracker = 13
+                    dp.now_init()
+                    dp.running_status_tracker = 14
+                    dp.duration_count_up()
+                    dp.running_status_tracker = 15
+                    self.diy_output(f"worker:my_thread_id={dp.my_thread_id},"+\
+                        "did not finish yet.Retrying...")
+                    dp.running_status_tracker = 16
+                    self.chunk_download_retry_init(dp=dp)
+                    dp.running_status_tracker = 17
+                    self.get_new_response(dp=dp)
+                    dp.running_status_tracker = 18
+                    # if self.download_as_file :
+                    #     f.seek(dp.curr_start)
+                    f.seek(dp.curr_start)
+                    dp.running_status_tracker = 19
+                    dp.now_running()
+                    dp.running_status_tracker = 20
+                else:
+                    break
+            except Exception as e:
+                dp.running_status_tracker = 21
+                self.diy_output(f"worker:my_thread_id={dp.my_thread_id},unknow error=",e)
+                break
+        f.close()
+        # if self.download_as_file :
+        #     f.close()
+        # else:
+        #     f.release()
+        if( is_not_finished() ):
+            dp.running_status_tracker = 22
+            self.diy_output(f"worker:my_thread_id={dp.my_thread_id}," + \
+                f"start={dp.curr_start} + getsize={dp.curr_getsize} -1 != end={dp.curr_end}," + \
+                "exit abnormally.")
+            dp.now_force_exit()
+            dp.running_status_tracker = 23
+            return None
+        dp.running_status_tracker = 24
+        dp.now_work_finished()
+        tmp_curr_getsize = dp.curr_getsize
+        dp.curr_getsize = 0
+        dp.history_done_size += tmp_curr_getsize
         total_time = dp.duration
-        average_speed = total_size / total_time
-        average_speed_humanize = \
-            down.get_humanize_size(size_in_byte = average_speed ) + "/s"
-        res_dict = {
-            "downloaded_size":total_size,
-            "downloaded_size_h":down.get_humanize_size(total_size),
-            "total_time":total_time,
-            "average_speed":average_speed,
-            "average_speed_h":average_speed_humanize
-        }
-        del down
-        return res_dict
+        total_size = dp.history_done_size
+        average_speed = self.get_humanize_size(size_in_byte = total_size/total_time )
+        self.diy_output(f"worker:my_thread_id={dp.my_thread_id},my job had done." +\
+             f"Total downloaded: {self.get_humanize_size(total_size)}," +\
+             f"total_time: {(total_time):.3f}s,"+ \
+             f"average_speed: {average_speed}/s,"+ \
+             f"retry_count: {dp.retry_count}")
+        # time.sleep(0.2)
+        dp.now_exit()
 
-    def just_test_1_0_0_0_p24_network(self):
-        ipv4_network_obj = ipaddress.IPv4Network("1.0.0.0/24")
-        # sub_network_iter = ipv4_network_obj.subnets(new_prefix=32)
-        # a_list = [ str(item.network_address) for item in sub_network_iter ]
-        # print(a_list)
-        curr_local_time = self.tool_utils.get_curr_local_time()
-        curr_local_time_str = self.tool_utils.get_curr_local_time_str(
-                    curr_local_time=curr_local_time)
+    # 自动转化字节数为带计算机1024进制单位的字符串
+    def get_humanize_size(self, size_in_byte):
+        size_in_byte = int(size_in_byte)
+        if size_in_byte < 1024: # size under 1024 bytes (1KiB)
+            return str(size_in_byte) + "byte"
+        elif size_in_byte < 0x100000: # size under 1MiB (1048576 Bytes)
+            result_num = (size_in_byte >> 10) + \
+                ((size_in_byte & 0x3FF)*self.ONE_OF_1024 )
+            return ("%.3f"%result_num) + "KiB"
+        elif size_in_byte < 0x40000000: # size under 1GiB (1073741824 Bytes)
+            result_num = (size_in_byte >> 20) + \
+                (((size_in_byte & 0xFFC00) >> 10)*self.ONE_OF_1024 )
+            return ("%.3f"%result_num) + "MiB"
+        # size equal or greater than 1GiB... Wow!
+        result_num = (size_in_byte >> 30) + \
+                (((size_in_byte & 0x3FF00000) >> 20)*self.ONE_OF_1024 )
+        return ("%.3f"%result_num) + "GiB"
+
+    def dp_list_getsize(self):
+        dp:download_progress
+        for dp in self.download_progress_list:
+            yield (dp.history_done_size + dp.curr_getsize)
+
+    def dp_list_truesize(self):
+        dp:download_progress
+        for dp in self.download_progress_list:
+            yield dp.history_done_size
+
+    def is_download_finished(self)->bool:
+        return (sum( self.dp_list_truesize() ) == self.total_workload)
+
+    def keep_run_until_download_finished(self, func, delay):
+        while (not self.download_finished):
+            func()
+            time.sleep(delay)
+
+    def update_download_finished_flag(self):
+        self.download_finished = self.is_download_finished()
+
+    def download_monitor_str(self):
+        last_process = 0
+        little_watchdog = time.time()
+        while True:
+            last = sum( self.dp_list_getsize() )
+            time.sleep(1)
+            curr = sum( self.dp_list_getsize() )
+            complete_size = curr
+            process = complete_size / self.total_workload * 100
+            complete_size_str = self.get_humanize_size(size_in_byte = complete_size )
+            speed = self.get_humanize_size(size_in_byte = (curr-last))
+            self.diy_output(f"downloaded: {complete_size_str:10} | process: {process:6.2f}% | speed: {speed}/s {' '*5}", end="\r")
+            if self.download_finished:
+                complete_size_str = self.get_humanize_size(size_in_byte = complete_size )
+                self.diy_output(f"downloaded: {complete_size_str:10} | process: {100.00:6}% | speed:  0Byte/s ", end=" | ")
+                break
+            if last_process == process:
+                if time.time() - little_watchdog > 5:
+                    self.diy_output("Maybe something went wrong...")
+            else:
+                little_watchdog = time.time()
+            last_process = process
+
+    def schedule_dp_deliver(self, dp:download_progress):
+        ds = dp.downloader_thread_status
+        if ds == STATUS_RUNNING:
+            self.status_running_queue.queue.put(dp)
+            self.status_running_queue.lock.unlock()
+        elif ds == STATUS_EXIT:
+            self.status_exit_queue.queue.put(dp)
+            self.status_exit_queue.lock.unlock()
+        elif ds == STATUS_FORCE_EXIT:
+            self.status_force_exit_queue.queue.put(dp)
+            self.status_force_exit_queue.lock.unlock()
+        elif ds == STATUS_PAUSE:
+            self.status_pause_queue.queue.put(dp)
+            self.status_pause_queue.lock.unlock()
+        else:
+            self.status_other_queue.queue.put(dp)
+            self.status_other_queue.lock.unlock()
+
+    def schedule_scan_dp_list(self):
+        for dp in self.download_progress_list:
+            self.schedule_dp_deliver(dp=dp)
+
+    def schedule_status_running_queue(self):
+        my_schedule_queue = self.status_running_queue
+        while not my_schedule_queue.queue.empty():
+            dp:download_progress = my_schedule_queue.queue.get()
+            # TODO: do something but never put item back to queue
+        my_schedule_queue.lock.block_myself()
+
+    def schedule_status_force_exit_queue(self):
+        my_schedule_queue = self.status_force_exit_queue
+        while not my_schedule_queue.queue.empty():
+            dp:download_progress = my_schedule_queue.queue.get()
+            if dp.downloader_thread_status != STATUS_FORCE_EXIT:
+                continue
+            dp.now_init()
+            self.chunk_download_retry_init(dp=dp)
+            dp.keep_run = True
+            self.diy_output("schedule:Resubmit a worker,"+\
+                f"my_thread_id={dp.my_thread_id},"+\
+                f"start_from={dp.curr_start}," + \
+                f"end_at={dp.curr_end},"+\
+                f"total_work_load={self.get_humanize_size(dp.get_curr_workload())}.")
+            try:
+                future = self.download_tp.submit(self.download, dp=dp )
+                dp.my_future = future
+            except Exception as e:
+                self.diy_output(f"schedule:thread_id={dp.my_thread_id},"+\
+                    f"resubmit failed!Error=",e)
+            else:
+                self.diy_output(f"schedule:thread_id={dp.my_thread_id},"+\
+                    f"resubmit succeed!{' '*30}")
+        my_schedule_queue.lock.block_myself()
+
+    def schedule_status_exit_queue(self):
+        my_schedule_queue = self.status_exit_queue
+        while not my_schedule_queue.queue.empty():
+            dp:download_progress = my_schedule_queue.queue.get()
+            # TODO: do something but never put item back to queue
+        my_schedule_queue.lock.block_myself()
+
+    def schedule_status_pause_queue(self):
+        my_schedule_queue = self.status_pause_queue
+        while not my_schedule_queue.queue.empty():
+            dp:download_progress = my_schedule_queue.queue.get()
+            # TODO: do something but never put item back to queue
+        my_schedule_queue.lock.block_myself()
+
+    def schedule_status_other_queue(self):
+        my_schedule_queue = self.status_other_queue
+        while not my_schedule_queue.queue.empty():
+            dp:download_progress = my_schedule_queue.queue.get()
+            # TODO: do something but never put item back to queue
+            # time.sleep(0.1)
+        my_schedule_queue.lock.block_myself()
+
+    def schedule_main(self):
+        schedule_postman = threading.Thread(
+            target=self.keep_run_until_download_finished, 
+            args=[ self.schedule_scan_dp_list, 
+                self.schedule_frequent ],
+            daemon=True)
+        schedule_postman.start()
+
+        self.schedule_scan_dp_list()
+        udff = threading.Thread(
+            target=self.keep_run_until_download_finished, 
+            args=[ self.update_download_finished_flag, 0.2 ],
+            daemon=True)
+        udff.start()
+
+        ss_running = threading.Thread(
+            target=self.keep_run_until_download_finished, 
+            args=[ self.schedule_status_running_queue, 0 ],
+            daemon=True)
+        ss_exit = threading.Thread(
+            target=self.keep_run_until_download_finished, 
+            args=[ self.schedule_status_exit_queue, 0 ],
+            daemon=True)
+        ss_force_exit = threading.Thread(
+            target=self.keep_run_until_download_finished, 
+            args=[ self.schedule_status_force_exit_queue, 0 ], 
+            daemon=True)
+        ss_pause = threading.Thread(
+            target=self.keep_run_until_download_finished, 
+            args=[ self.schedule_status_pause_queue, 0 ],
+            daemon=True)
+        ss_other = threading.Thread(
+            target=self.keep_run_until_download_finished, 
+            args=[ self.schedule_status_other_queue, 0 ],
+            daemon=True)
+        
+        ss_running.start()
+        ss_exit.start()
+        ss_force_exit.start()
+        ss_pause.start()
+        ss_other.start()
+
+    def download_watchdog(self):
+        self.diy_output("download_watchdog is running...")
+        while( not self.download_finished ):
+            time.sleep(self.watchdog_frequent)
+            self.watchdog_lock.just_get_lock()
+            for dp in self.download_progress_list :
+                dp:download_progress
+                if dp.downloader_thread_status != STATUS_RUNNING :
+                    continue
+                if (time.time() - dp.last_check_time < 5):
+                    continue
+                if (dp.curr_getsize > dp.history_getsize) and \
+                    (dp.curr_getsize != 0):
+                    dp.history_getsize = dp.curr_getsize
+                    dp.last_check_time = time.time()
+                    continue
+                if dp.keep_run :
+                    self.diy_output(f"watchdog:thread_id={dp.my_thread_id},"+\
+                        f"had blocked over {self.watchdog_frequent} seconds!"+\
+                        f"retry_count={dp.retry_count},Restarting...")
+                    dp.keep_run = False
+                else:
+                    self.diy_output(f"watchdog:thread_id={dp.my_thread_id},"+\
+                        "failed to terminate!"+\
+                        f"tracker={dp.running_status_tracker},"+\
+                        f"Retrying...{' '*30}")
+
+                    try:
+                        dp.response_context.raw._fp.close()
+                        dp.hack_send_close_signal_count += 1
+                    except Exception:
+                        pass
+                dp.last_check_time = time.time()
+            self.watchdog_lock.unlock()
+        self.diy_output("download_watchdog exited.")
+
+    def get_response_with_content_length(self):
+        session = self.get_session_obj()
+        # 发起URL请求，将response对象存入变量 r
+        r = session.head( url=self.url, allow_redirects=True, verify=self.sni_verify)
+        headers = r.headers
+        def content_length_exist():
+            flag = (r.status_code == HTTPStatus.OK.value and \
+                ("Content-Length" in headers) and headers["Content-Length"])
+            return flag
+        if content_length_exist():
+            return r
+        elif self.stream: # 如果服务器不允许通过head请求探测资源大小
+            r.close()
+            session = self.get_session_obj()
+            r = session.get(url=self.url, allow_redirects=True, verify=self.sni_verify, stream=True)
+            it = r.iter_content(chunk_size=8)
+            if content_length_exist():
+                return r
+        # raise ValueError("unsupport response type.\"Content-Length\" is needed.")
+        self.diy_output("unsupport response type.\"Content-Length\" is needed.")
+        return None
+
+    def download_range_init(self)->bool:
+        self.diy_output("Sending request for URL detail...")
         start_time = time.time()
-        task_dict:dict={
-            "time":curr_local_time_str,
-            "task_detail":{
-                "function":"just_test_1_0_0_0_p24_network",
-                "major_var":{},
-                "duration_in_sec":0
-            },
-            "result":{}
-        }
-        ping_task_dict = self.tool_utils.ping_scan_ipv4_subnetwork(
-            network_obj=ipv4_network_obj,
-            end_prefixlen=32,
-            wirte_to_file=True,
-            violence_mode=False
-        )
-        # print(ping_task_dict)
-        hosts_dict:dict = ping_task_dict["result"]["reachable"]["lowest_loss_host"]["hosts"]
-        hosts_iter = hosts_dict.keys()
-        test_host_list = list(hosts_iter)
+        # 从回复数据获取文件大小
+        r = self.get_response_with_content_length()
+        self.response_with_content_length = r
+        took_time = "%.3f"%(time.time()-start_time)
+        self.diy_output("Took {} seconds.".format(took_time) )
+        if r == None:
+            self.diy_output("File size request failed.Download canceled!")
+            return False
+        self.diy_output("Vaild response received.")
+        self.origin_size = int(r.headers["Content-Length"])
+        if self.specific_range == None:
+            self.specific_range=(0, self.origin_size)
+            self.total_workload = self.origin_size
+            return True
+        if isinstance(self.specific_range, tuple) and \
+            len(self.specific_range) == 2 and \
+            isinstance(self.specific_range[0], int) and \
+            isinstance(self.specific_range[1], int):
+                start = self.specific_range[0]
+                end = self.specific_range[1]
+                if start <= end and \
+                    start < self.origin_size and \
+                    end <= self.origin_size:
+                    self.total_workload = end - start
+                    return True
+        self.diy_output("specific_range parameter is illegal!")
+        return False
+    
+    def download_url_init(self):
+        self.url_parse = parse.urlparse(url=self.url)
+        self.hostname = self.url_parse.hostname
+        self.is_https = False
+        self.ip_direct_url = None
+        if self.url_parse.scheme == "https":
+            self.is_https = True
+        if self.specific_ip_address != None and not self.is_https:
+            pattern = re.compile(r"http://"+ re.escape(self.hostname) )
+            self.ip_direct_url = re.sub(pattern, \
+                repl="http://"+self.specific_ip_address ,string=self.url)
 
-        result_dict = task_dict["result"]
-        total_download_size = 0
-        total_download_time = 0.0
-        total_average_speed = 0.0
-        for ip_address in test_host_list:
-            tmp_speedtest_result = self.just_speedtest(
-                specific_ip_address=ip_address
-            )
-            result_dict[ip_address] = tmp_speedtest_result
-            total_download_size += tmp_speedtest_result["downloaded_size"]
-            total_download_time += tmp_speedtest_result["total_time"]
+    def download_file_space_allocation(self):
+        self.full_path_to_file = self.storage_root + self.filename
+        if self.download_as_file:
+            self.diy_output("Download file path=\"{}\"".format(self.full_path_to_file))
+        else:
+            self.diy_output("Download file path=\"RAM\"")
+        self.diy_output("Download file origin size={}".format(self.get_humanize_size(self.origin_size)))
+        self.diy_output("Download file size={}".format(self.get_humanize_size(self.total_workload)))
+        self.diy_output("File space allocating...")
+        start_time = time.time()
+        if not os.path.exists(self.storage_root):
+            os.makedirs(self.storage_root)
+        if self.download_as_file:
+            # 优先创建 size 大小的占位文件
+            f = open(self.full_path_to_file, "wb")
+            f.truncate(self.total_workload)
+            f.close()
+        else:
+            # 优先占用 size 大小的RAM内存空间
+            self.download_to_ram = bytearray(self.total_workload)
+        took_time = "%.3f"%(time.time()-start_time)
+        self.diy_output("Took {} seconds.".format(took_time) )
+        self.diy_output("File space allocated.")
 
-        took_time = time.time() - start_time
-        task_dict["task_detail"]["duration_in_sec"] = took_time
-        self.diy_output("Took {} seconds.".format("%.3f"%took_time) )
+    def download_init(self)->bool:
+        self.download_url_init()
+        self.diy_output("Download URL="+self.url)
+        self.diy_output("user_agent="+self.user_agent)
+        if not self.download_range_init():
+            return False
+        # 初始化文件名，确保不空着
+        if (self.default_filename == self.filename or \
+            self.filename == None or self.filename == ""):
+            self.filename = self.get_file_name(
+                url=self.url, 
+                response=self.response_with_content_length)
+        self.download_file_space_allocation()
+        return True
 
-        total_average_speed = total_download_size / total_download_time
-        major_var_dict = task_dict["task_detail"]["major_var"]
-        major_var_dict["total_download_size"] = total_download_size
-        major_var_dict["total_download_time"] = total_download_time
-        major_var_dict["total_average_speed"] = total_average_speed
-        for ip_address in test_host_list:
-            curr_host_avg_speed = float(result_dict[ip_address]["average_speed"])
-            if curr_host_avg_speed < total_average_speed:
-                del result_dict[ip_address]
+    def compute_sha256_hash(self)->str:
+        file_data = None
+        if self.download_as_file :
+            with open(self.full_path_to_file, "rb") as file_stream:
+                file_data = file_stream.read()
+        else:
+            file_data = self.download_to_ram
+        sha256_obj = hashlib.sha256()
+        sha256_obj.update(file_data)
+        hash_value = sha256_obj.hexdigest().upper()
+        return hash_value
 
-        self.tool_utils.write_obj_to_json_file(
-            filename=None,
-            curr_local_time=self.tool_utils.get_curr_local_time(),
-            obj=task_dict
-        )
+    def main(self)->bool:
+        # self.diy_output("Download mission overview:")
+        if self.stream == False:
+            self.just_get()
+            return True
+        self.download_status = DL_INITIATING
+        if not self.download_init():
+            self.download_status = DL_FAILED
+            return False
+        self.diy_output("Starting download...")
+        self.download_tp = ThreadPoolExecutor(max_workers=self.thread_num)
+        start = self.specific_range[0]
+        total_workload = self.specific_range[1] - self.specific_range[0]
+        part_size = int(total_workload / self.thread_num)
+        self.download_status = DL_RUNNING
+        start_time = time.time()
+        for i in range(self.thread_num):
+            if(i+1 == self.thread_num):
+                end = self.specific_range[1] -1
+            else:
+                end = (i+1) * part_size -1
+            dp = download_progress(start=start, end=end, my_thread_id=i, chunk_size=256 )
+            self.download_progress_list.append(dp)
+            future = self.download_tp.submit(self.download, dp=dp)
+            self.diy_output(f"Submit a worker,my_thread_id={i},start_from={start},end_at={end},"+\
+                f"total_work_load={self.get_humanize_size(dp.get_curr_workload())}")
+            dp.my_future = future
+            start = end +1
+        
+        self.schedule_main()
+        # TODO: 多线程动态断点续传，一个worker完成本职工作可以帮助另一个worker完成其工作
+        dms_thread = threading.Thread(target=self.download_monitor_str, daemon=True)
+        dms_thread.start()
+        if(self.use_watchdog):
+            dw_thread = threading.Thread(target=self.download_watchdog, daemon=True)
+            dw_thread.start()
+        # self.diy_output("keep running")
+        dms_thread.join()
+        # self.download_monitor_str()
+        end_time = time.time()
+        self.download_tp.shutdown()
+        total_time = end_time - start_time
+        average_speed = self.get_humanize_size(size_in_byte = self.total_workload/total_time )
+        self.diy_output(f"total-time: {total_time:.3f}s | average-speed: {average_speed}/s")
 
+        if self.sha256_hash_value != None:
+            self.diy_output("Given sha256 hash value is   :" + self.sha256_hash_value)
+            hash_value = self.compute_sha256_hash()
+            self.diy_output("Compute sha256 hash value is :" + hash_value)
+            if (hash_value == self.sha256_hash_value):
+                self.download_status = DL_COMPLETE
+                self.diy_output("Hash matched!")
+            else:
+                self.download_status = DL_FAILED
+                self.diy_output("Hash not match.Maybe file is broken.")
+        else:
+            self.download_status = DL_COMPLETE
+            self.diy_output("Compute sha256 hash value is :" + self.compute_sha256_hash())
+        return True
 
-    def main(self):
+    def speedtest_download(self, dp:download_progress):
+        self.get_new_response(dp=dp)
+        def is_not_finished()->bool:
+            return (dp.curr_start + dp.curr_getsize -1 != dp.curr_end)
+        f = self.get_file_io()
+        f.seek(dp.curr_start)
+        dp.now_running()
+        while dp.keep_run and is_not_finished():
+            try:
+                chunk_data = next(dp.it)
+                chunk_data_len = len(chunk_data)
+                dp.curr_getsize += chunk_data_len
+                f.write(chunk_data)
+            except StopIteration:
+                dp.it.close()
+                break
+            except requests.ConnectionError as e:
+                self.diy_output(f"worker:my_thread_id={dp.my_thread_id},known error=",e)
+                break
+            except Exception as e:
+                    self.diy_output(f"worker:my_thread_id={dp.my_thread_id},unknow error=",e)
+                    break
+        f.close()
+        if( is_not_finished() ):
+            self.diy_output(f"worker:my_thread_id={dp.my_thread_id}," + \
+                f"start={dp.curr_start} + getsize={dp.curr_getsize} -1 != end={dp.curr_end}," + \
+                "exit abnormally.")
+            dp.now_force_exit()
+            return None
+        dp.now_work_finished()
+        tmp_curr_getsize = dp.curr_getsize
+        dp.curr_getsize = 0
+        dp.history_done_size += tmp_curr_getsize
+        total_time = dp.duration
+        total_size = dp.history_done_size
+        average_speed = self.get_humanize_size(size_in_byte = total_size/total_time )
+        self.diy_output(f"worker:my_thread_id={dp.my_thread_id},my job had done." +\
+             f"Total downloaded:{self.get_humanize_size(total_size)}," +\
+             f"total_time={(total_time):.3f}s,"+ \
+             f"average_speed: {average_speed}/s,"+ \
+             f"retry_count={dp.retry_count}")
+        # time.sleep(0.2)
+        dp.now_exit()
 
-        # self.just_speedtest(str(self.network_address.next()))
-        pass
-    pass
+    def speedtest_countdown(self, 
+            dp:download_progress, 
+            timeout_to_stop ):
+        ds = dp.downloader_thread_status
+        while(ds == STATUS_INIT or ds == STATUS_READY):
+            ds = dp.downloader_thread_status
+            continue
+        time.sleep(timeout_to_stop)
+        if (dp.downloader_thread_status == STATUS_RUNNING):
+            dp.response_context.raw._fp.close()
 
+    def speedtest_single_thread(self, timeout_to_stop):
+        if not self.download_init():
+            return None
+        self.diy_output("Debug version is running.")
+        self.diy_output("Starting speedtest...")
+        start = self.specific_range[0]
+        end = self.specific_range[1] -1
+        dp = download_progress(
+            start=start, 
+            end=end, 
+            my_thread_id=0, 
+            chunk_size=256 )
+        self.download_progress_list = [dp]
+        sc_thread = threading.Thread(
+            target=self.speedtest_countdown, 
+            args=[ dp, timeout_to_stop], 
+            daemon=True)
+        sc_thread.start()
+        speedtest_thread = threading.Thread(
+            target=self.speedtest_download,
+            args=[ dp ], daemon=True)
+        speedtest_thread.start()
+        # self.speedtest_download(dp)
+        speedtest_thread.join()
+        return None
+
+    def just_get(self, timeout_to_stop = None)->Response:
+        self.download_status = DL_INITIATING
+        self.stream = False
+        if timeout_to_stop != None:
+            self.timeout_to_retry = timeout_to_stop
+        dp = download_progress()
+        dp.keep_get_new_request = False
+        self.download_progress_list = [ dp ]
+        self.download_status = DL_RUNNING
+        self.get_new_response(dp=dp)
+        if dp.response_context == None:
+            self.download_status = DL_FAILED
+        else:
+            self.download_status = DL_COMPLETE
+        return dp.response_context
 
 if __name__ == "__main__":
-    # test = cloudflare_cdn_tool_utils()
-    # res = test.iteration_get_best_network(
-    #                 wirte_to_file=True,
-    #                 get_blackwhitelist=True,
-    #                 iterate_times=3 )
-    # print(res)
-    
+    thread_num = 32
+    specific_ip_address = "1.0.0.0"
+    # specific_ip_address = "1.0.0.100"
+    # specific_ip_address = None
+    sha256_hash_value = None
+    specific_range = None
+    # url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
+    # sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
     url = "https://speed.haoren.ml/cache.jpg"
+    # sha256_hash_value = "A0D7DD06B54AFBDFB6811718337C6EB857885C489DA6304DAB1344ECC992B3DB"
+    # 128 MiB version
+    sha256_hash_value = "45A3AE1D8321E9C99A5AEEA31A2993CF1E384661326C3D238FFAFA2D7451AEDB"
     specific_range = (0,134217728)
-    test = cloudflare_cdn_speedtest(
-        url=url,
+    # url = "https://speed.cloudflare.com/__down?bytes=92"
+    # sha256_hash_value = None
+    # url = "http://127.0.0.1/download/text/123.txt"
+    # sha256_hash_value = "3DCCBFEE56F49916C3264C6799174AF2FDDDEE75DD98C9E7EA5DF56C6874F0D7"
+    down = downloader(
+        url=url, 
+        specific_ip_address=specific_ip_address, 
+        thread_num=thread_num,
+        sha256_hash_value=sha256_hash_value,
         specific_range=specific_range,
-        download_as_file=False
-    )
-    test.just_test_1_0_0_0_p24_network()
+        download_as_file=False,
+        allow_print = True )
+    down.main()
+    
 
-
-
+    
