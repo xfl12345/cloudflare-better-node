@@ -39,7 +39,7 @@ from my_const import DL_COMPLETE
 from my_const import DL_FAILED
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-01 22:37:25"
+__updated__ = "2021-03-01 23:44:03"
 __version__ = 0.5
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
@@ -749,7 +749,7 @@ class downloader:
         return False
     
     def download_url_init(self):
-        self.url_parse = parse.urlparse(url=url)
+        self.url_parse = parse.urlparse(url=self.url)
         self.hostname = self.url_parse.hostname
         self.is_https = False
         self.ip_direct_url = None
