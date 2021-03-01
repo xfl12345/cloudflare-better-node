@@ -19,7 +19,7 @@ import my_const
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-01 23:22:15"
+__updated__ = "2021-03-02 00:10:28"
 __version__ = 0.1
 
 class cloudflare_cdn_tool_utils:
@@ -562,7 +562,7 @@ class cloudflare_cdn_speedtest:
             network_obj=ipv4_network_obj,
             end_prefixlen=32,
             wirte_to_file=True,
-            violence_mode=True
+            violence_mode=False
         )
         # print(ping_task_dict)
         hosts_dict:dict = ping_task_dict["result"]["reachable"]["lowest_loss_host"]["hosts"]
