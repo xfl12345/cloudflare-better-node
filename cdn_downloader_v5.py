@@ -39,7 +39,7 @@ from my_const import DL_COMPLETE
 from my_const import DL_FAILED
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-01 23:44:03"
+__updated__ = "2021-03-02 00:48:11"
 __version__ = 0.5
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
@@ -350,19 +350,22 @@ class downloader:
                 dp.it = dp.response_context.iter_content( chunk_size=dp.chunk_size )
         dp.now_ready()
 
+    def get_file_io(self):
+        f = None
+        if self.download_as_file :
+            f = open(self.full_path_to_file, "rb+")
+        else:
+            f = LimitedBytearrayIO(self.download_to_ram)
+        return f
+
+
     # 下载文件的核心函数
     def download(self, dp:download_progress):
         self.get_new_response(dp=dp)
         is_enforce_mode:bool = True
         if dp.getsize_strict_level != LEVEL_ENFORCE:
             is_enforce_mode = False
-        f = None
-        # file write init
-        if self.download_as_file :
-            f = open(self.full_path_to_file, "rb+")
-        else:
-            f = LimitedBytearrayIO(self.download_to_ram)
-            # f = memoryview(self.download_to_ram)
+        f = self.get_file_io()
         f.seek(dp.curr_start)
         # def save_data(data_in_bytearray, curr_pos):
         #     if self.download_as_file :
@@ -875,24 +878,25 @@ class downloader:
         self.get_new_response(dp=dp)
         def is_not_finished()->bool:
             return (dp.curr_start + dp.curr_getsize -1 != dp.curr_end)
-        with open(self.full_path_to_file, "rb+") as f:
-            f.seek(dp.curr_start)
-            dp.now_running()
-            while dp.keep_run and is_not_finished():
-                try:
-                    chunk_data = next(dp.it)
-                    chunk_data_len = len(chunk_data)
-                    dp.curr_getsize += chunk_data_len
-                    f.write(chunk_data)
-                except StopIteration:
-                    dp.it.close()
-                    break
-                except requests.ConnectionError as e:
-                    self.diy_output(f"worker:my_thread_id={dp.my_thread_id},known error=",e)
-                    break
-                except Exception as e:
+        f = self.get_file_io()
+        f.seek(dp.curr_start)
+        dp.now_running()
+        while dp.keep_run and is_not_finished():
+            try:
+                chunk_data = next(dp.it)
+                chunk_data_len = len(chunk_data)
+                dp.curr_getsize += chunk_data_len
+                f.write(chunk_data)
+            except StopIteration:
+                dp.it.close()
+                break
+            except requests.ConnectionError as e:
+                self.diy_output(f"worker:my_thread_id={dp.my_thread_id},known error=",e)
+                break
+            except Exception as e:
                     self.diy_output(f"worker:my_thread_id={dp.my_thread_id},unknow error=",e)
                     break
+        f.close()
         if( is_not_finished() ):
             self.diy_output(f"worker:my_thread_id={dp.my_thread_id}," + \
                 f"start={dp.curr_start} + getsize={dp.curr_getsize} -1 != end={dp.curr_end}," + \
