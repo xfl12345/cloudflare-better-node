@@ -1,13 +1,14 @@
+import copy
+import hashlib
 import io
 import os
+import queue
+import re
+import requests
 import sys
 import time
-import threading
-import requests
-import re
-import hashlib
 import typing
-import queue
+import threading
 
 from concurrent.futures import ThreadPoolExecutor
 from urllib import parse
@@ -15,6 +16,7 @@ from requests.models import Response
 from requests.sessions import HTTPAdapter
 from forced_ip_https_adapter import ForcedIPHTTPSAdapter
 from my_ram_io import LimitedBytearrayIO
+from diy_thread_lock import my_thread_lock
 
 from http import HTTPStatus
 # download 线程状态常量
@@ -37,60 +39,10 @@ from my_const import DL_COMPLETE
 from my_const import DL_FAILED
 
 # 最后一次代码修改时间
-__updated__ = "2021-02-28 15:47:18"
+__updated__ = "2021-03-01 22:37:25"
 __version__ = 0.5
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
-class my_thread_lock:
-    # wait_time = 0
-    # allow_run = False
-    # is_running = False
-    # wait_time_count = 0
-
-    def __init__(self):
-        self.lock = threading.Lock()
-
-    # 获取该锁是否已锁
-    def is_locked(self):
-        return self.lock.locked()
-
-    # 不管怎么样，宁愿被阻塞，我就是要获取这个锁，
-    # 因为我需要独享某个资源
-    def just_get_lock(self):
-        self.lock.acquire(blocking=True)
-        return self.lock.locked()
-
-    # 不管怎么样，宁愿被阻塞，也要锁上这个锁，
-    # 哪怕我不是为了使用某个资源，只是为了锁定
-    def just_lock(self):
-        if( self.lock.locked() == False ):
-            self.just_get_lock()
-        return self.lock.locked()
-
-    # 我不是为了锁资源的，而纯粹为了阻塞我自己，
-    # 封印我自己，只为等到有人解除我的封印
-    def block_myself(self):
-        self.trylock()
-        self.just_get_lock()
-        self.unlock()
-        return True
-
-    # 尝试锁上，得逞了就得逞了，没得逞也不阻塞
-    def trylock(self):
-        if( self.lock.locked() ):
-            return False
-        if( self.lock.acquire(blocking=False) ):
-            return self.lock.locked()
-        return False
-
-    def unlock(self):
-        try:
-            self.lock.release()
-            return True
-        except RuntimeError as e:
-            pass
-            # print("my_thread_lock:error =",e)
-        return False
 
 class download_progress:
     def __init__(self,
@@ -187,6 +139,34 @@ class schedule_queue:
         self.queue:queue.Queue = queue.Queue()
         self.lock = my_thread_lock()
 
+# class downloader_param:
+#     def __init__(self, 
+#             url:str, 
+#             download_as_file:bool=True,
+#             thread_num:int=4,
+#             max_retries:int=0,
+#             timeout_to_retry:float=3,
+#             stream:bool=True,
+#             sni_verify:bool=True,
+#             use_watchdog:bool=True,
+#             sha256_hash_value:str=None,
+#             specific_ip_address:str=None,
+#             specific_range:tuple=None,
+#             **kwargs):
+        
+#         self.url:str = url
+#         self.download_as_file:bool=download_as_file
+#         self.thread_num:int=thread_num
+#         self.max_retries:int=max_retries
+#         self.timeout_to_retry:float=timeout_to_retry
+#         self.stream:bool=stream
+#         self.sni_verify:bool=sni_verify
+#         self.use_watchdog:bool=use_watchdog
+#         self.sha256_hash_value:str=sha256_hash_value
+#         self.specific_ip_address:str=specific_ip_address
+#         self.specific_range:tuple=specific_range
+#         self.kwargs = kwargs
+
 # source code URL: https://blog.csdn.net/qq_42951560/article/details/108785802
 class downloader:
     ONE_OF_1024:float = 0.0009765625 # 1/1024
@@ -241,6 +221,7 @@ class downloader:
         self.use_watchdog:bool = use_watchdog
         self.specific_range:tuple = specific_range
         self.allow_print:bool = True
+        self.watchdog_lock = my_thread_lock()
 
         if "allow_print" in kwargs:
             self.allow_print = bool(kwargs.pop("allow_print"))
@@ -261,7 +242,6 @@ class downloader:
             schedule_queue(dp_status=STATUS_PAUSE)
         self.status_other_queue:schedule_queue = \
             schedule_queue(dp_status=None)
-        self.watchdog_lock = my_thread_lock()
 
         self.download_finished:bool = False
 
@@ -269,19 +249,7 @@ class downloader:
             self.sha256_hash_value = sha256_hash_value.upper()
         if not os.path.exists(self.storage_root):
             os.makedirs(self.storage_root)
-
-        self.url_parse = parse.urlparse(url=url)
-        self.hostname = self.url_parse.hostname
-        self.is_https = False
-        self.ip_direct_url = None
         
-        if self.url_parse.scheme == "https":
-            self.is_https = True
-        
-        if self.specific_ip_address != None and not self.is_https:
-            pattern = re.compile(r"http://"+ re.escape(self.hostname) )
-            self.ip_direct_url = re.sub(pattern, \
-                repl="http://"+self.specific_ip_address ,string=self.url)
 
     def diy_output(self,*objects, sep=' ', end='\n', file=sys.stdout, flush=False):
         if self.allow_print:
@@ -290,6 +258,9 @@ class downloader:
     #source code URL:https://blog.csdn.net/mbh12333/article/details/103721834
     def get_file_name(self,url:str, response:Response)->str:
         filename = ''
+        if response == None:
+            self.response_with_content_length = self.get_response_with_content_length()
+            response = self.response_with_content_length
         headers = response.headers
         if 'Content-Disposition' in headers and headers['Content-Disposition']:
             disposition_split = headers['Content-Disposition'].split(';')
@@ -746,29 +717,7 @@ class downloader:
         self.diy_output("unsupport response type.\"Content-Length\" is needed.")
         return None
 
-    def download_range_init(self, origin_size:int)->bool:
-        self.origin_size = origin_size
-        if self.specific_range == None:
-            self.specific_range=(0, self.origin_size)
-            self.total_workload = self.origin_size
-            return True
-        if type(self.specific_range) is tuple and \
-            len(self.specific_range) == 2 and \
-            type(self.specific_range[0]) is int and \
-            type(self.specific_range[1]) is int :
-                start = self.specific_range[0]
-                end = self.specific_range[1]
-                if start <= end and \
-                    start < origin_size and \
-                    end <= origin_size:
-                    self.total_workload = end - start
-                    return True
-        self.diy_output("specific_range parameter is illegal!")
-        return False
-
-    def download_init(self)->bool:
-        self.diy_output("Download URL="+self.url)
-        self.diy_output("user_agent="+self.user_agent)
+    def download_range_init(self)->bool:
         self.diy_output("Sending request for URL detail...")
         start_time = time.time()
         # 从回复数据获取文件大小
@@ -780,14 +729,38 @@ class downloader:
             self.diy_output("File size request failed.Download canceled!")
             return False
         self.diy_output("Vaild response received.")
-        origin_size = int(r.headers["Content-Length"])
-        if not self.download_range_init(origin_size=origin_size):
-            return False
-        # 初始化文件名，确保不空着
-        if (self.default_filename == self.filename or \
-            self.filename == None or self.filename == ""):
-            self.filename = self.get_file_name(url=self.url, response=r)
-        r.close()
+        self.origin_size = int(r.headers["Content-Length"])
+        if self.specific_range == None:
+            self.specific_range=(0, self.origin_size)
+            self.total_workload = self.origin_size
+            return True
+        if isinstance(self.specific_range, tuple) and \
+            len(self.specific_range) == 2 and \
+            isinstance(self.specific_range[0], int) and \
+            isinstance(self.specific_range[1], int):
+                start = self.specific_range[0]
+                end = self.specific_range[1]
+                if start <= end and \
+                    start < self.origin_size and \
+                    end <= self.origin_size:
+                    self.total_workload = end - start
+                    return True
+        self.diy_output("specific_range parameter is illegal!")
+        return False
+    
+    def download_url_init(self):
+        self.url_parse = parse.urlparse(url=url)
+        self.hostname = self.url_parse.hostname
+        self.is_https = False
+        self.ip_direct_url = None
+        if self.url_parse.scheme == "https":
+            self.is_https = True
+        if self.specific_ip_address != None and not self.is_https:
+            pattern = re.compile(r"http://"+ re.escape(self.hostname) )
+            self.ip_direct_url = re.sub(pattern, \
+                repl="http://"+self.specific_ip_address ,string=self.url)
+
+    def download_file_space_allocation(self):
         self.full_path_to_file = self.storage_root + self.filename
         if self.download_as_file:
             self.diy_output("Download file path=\"{}\"".format(self.full_path_to_file))
@@ -810,6 +783,20 @@ class downloader:
         took_time = "%.3f"%(time.time()-start_time)
         self.diy_output("Took {} seconds.".format(took_time) )
         self.diy_output("File space allocated.")
+
+    def download_init(self)->bool:
+        self.download_url_init()
+        self.diy_output("Download URL="+self.url)
+        self.diy_output("user_agent="+self.user_agent)
+        if not self.download_range_init():
+            return False
+        # 初始化文件名，确保不空着
+        if (self.default_filename == self.filename or \
+            self.filename == None or self.filename == ""):
+            self.filename = self.get_file_name(
+                url=self.url, 
+                response=self.response_with_content_length)
+        self.download_file_space_allocation()
         return True
 
     def compute_sha256_hash(self)->str:
