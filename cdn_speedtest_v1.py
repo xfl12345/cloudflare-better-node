@@ -21,7 +21,7 @@ import my_const
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-02 11:55:16"
+__updated__ = "2021-03-02 12:08:51"
 __version__ = 0.1
 
 class cloudflare_cdn_tool_utils:
@@ -262,9 +262,8 @@ class cloudflare_cdn_tool_utils:
                 max_task_num = max_task_num << 1  # cpu_num = cpu_num *2
             else:
                 max_task_num = 4
-            # p_pool = mp.Pool(maxtasksperchild=max_task_num)
-            
-            p_pool = ccfutures.ProcessPoolExecutor( max_workers=max_task_num )
+            # p_pool = ccfutures.ProcessPoolExecutor( max_workers=max_task_num )
+            p_pool = ccfutures.ThreadPoolExecutor( max_workers=max_task_num )
             for item in sub_network_iter:
                 ip_address = str(item.network_address)
                 sender, receiver = mp.Pipe(duplex=True)
