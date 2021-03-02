@@ -6,11 +6,13 @@ import json
 import ipaddress
 import multiprocessing as mp
 import multiprocessing.connection as mpc
+import concurrent.futures as ccfutures
 
 from forced_ip_https_adapter import ForcedIPHTTPSAdapter
 from cdn_downloader_v5 import downloader
 from cdn_downloader_v5 import download_progress
-from mpc_ping import simple_mpc_ping
+from ping_utils import simple_mpc_ping
+from ping_utils import simple_ping
 
 import pings
 import my_const
@@ -19,7 +21,7 @@ import my_const
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-02 00:09:12"
+__updated__ = "2021-03-02 11:55:16"
 __version__ = 0.1
 
 class cloudflare_cdn_tool_utils:
@@ -188,57 +190,6 @@ class cloudflare_cdn_tool_utils:
         self.diy_output("ping_scan_ipv4_subnetwork:Starting ping...")
         start_time = time.time()
 
-        mp_receiver_list = []
-
-        if violence_mode:
-            p_list = []
-            for item in sub_network_iter:
-                ip_address = str(item.network_address)
-                sender, receiver = mp.Pipe(duplex=True)
-                p = mp.Process(
-                    target=simple_mpc_ping, 
-                    args=(
-                        sender,         #mp_pipe_sender
-                        ip_address,     #ip_address
-                        32,             #packet_data_size
-                        400,            #timeout
-                        0,              #max_wait
-                        ping_times      #times
-                    )
-                )
-                mp_receiver_list.append(receiver)
-                p_list.append(p)
-                p.start()
-            # p_item:mp.Process
-            # for p_item in p_list:
-            #     p_item.join()
-        else:
-            max_task_num = os.cpu_count()
-            if max_task_num != None:
-                max_task_num = max_task_num << 1  # cpu_num = cpu_num *2
-            # p_pool = mp.Pool(maxtasksperchild=max_task_num)
-            p_pool = mp.Pool(processes=max_task_num)
-            p_asyncresult_list = []
-            for item in sub_network_iter:
-                ip_address = str(item.network_address)
-                sender, receiver = mp.Pipe(duplex=True)
-                p = p_pool.apply_async(
-                    func=simple_mpc_ping, 
-                    args=(
-                        sender,         #mp_pipe_sender
-                        ip_address,     #ip_address
-                        32,             #packet_data_size
-                        400,            #timeout
-                        0,              #max_wait
-                        ping_times      #times
-                    )
-                )
-                mp_receiver_list.append(receiver)
-                p_asyncresult_list.append(p)
-            # p_asyncresult:mp.pool.AsyncResult
-            # for p_asyncresult in p_asyncresult_list:
-            #     p_asyncresult.wait()
-
         curr_local_time = self.get_curr_local_time()
         curr_local_time_str = self.get_curr_local_time_str(curr_local_time=curr_local_time)
         ping_task_dict:dict = {
@@ -276,14 +227,69 @@ class cloudflare_cdn_tool_utils:
         lowest_loss_host_dict:dict = reachable_dict["lowest_loss_host"]
         normal_host_dict:dict = reachable_dict["normal_host"]
         unreachable_dict:dict = ping_result_dict["unreachable"]
-        
-        item:mpc.Connection
+  
         ip_addr:str
         r:pings.ping.Response
         low_dict_last_key:str
         lowest_loss_host_dict["count"] = 0
-        for item in mp_receiver_list:
-            res = dict(item.recv())
+        p_result_list = []
+        p_result_list_len = 0
+
+        if violence_mode:
+            for item in sub_network_iter:
+                ip_address = str(item.network_address)
+                sender, receiver = mp.Pipe(duplex=True)
+                p = mp.Process(
+                    target=simple_mpc_ping, 
+                    args=(
+                        sender,         #mp_pipe_sender
+                        ip_address,     #ip_address
+                        32,             #packet_data_size
+                        400,            #timeout
+                        0,              #max_wait
+                        ping_times      #times
+                    )
+                )
+                p_result_list.append(receiver)
+                p_result_list_len += 1
+                p.start()
+            # p_item:mp.Process
+            # for p_item in p_list:
+            #     p_item.join()
+        else:
+            max_task_num = os.cpu_count()
+            if max_task_num != None:
+                max_task_num = max_task_num << 1  # cpu_num = cpu_num *2
+            else:
+                max_task_num = 4
+            # p_pool = mp.Pool(maxtasksperchild=max_task_num)
+            
+            p_pool = ccfutures.ProcessPoolExecutor( max_workers=max_task_num )
+            for item in sub_network_iter:
+                ip_address = str(item.network_address)
+                sender, receiver = mp.Pipe(duplex=True)
+                p = p_pool.submit(
+                    simple_ping,
+                    ip_address=ip_address,  #ip_address
+                    packet_data_size=32,    #packet_data_size
+                    timeout=400,            #timeout
+                    max_wait=0,             #max_wait
+                    times=ping_times        #times
+                )
+                p_result_list.append(p)
+                p_result_list_len += 1
+            # p_asyncresult:mp.pool.AsyncResult
+            # for p_asyncresult in p_asyncresult_list:
+            #     p_asyncresult.wait()
+        
+
+        for index in range(p_result_list_len):
+            if violence_mode:
+                item_mpc:mpc.Connection = p_result_list[index]
+                res = dict( item_mpc.recv() )
+            else:
+                item_ccfut:ccfutures.Future = p_result_list[index]
+                res = dict( item_ccfut.result() )
             ip_addr,r = res.popitem()
             ping_result_dict["count"] += 1
             # 如果主机可达
@@ -331,6 +337,9 @@ class cloudflare_cdn_tool_utils:
                 curr_local_time=curr_local_time,
                 obj=ping_task_dict
             )
+
+        if not violence_mode:
+            p_pool.shutdown(wait=True)
 
         return ping_task_dict
 
