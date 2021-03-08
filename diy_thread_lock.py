@@ -45,7 +45,7 @@ class my_thread_lock:
         try:
             self.lock.release()
             return True
-        except RuntimeError as e:
+        except Exception as e:
             pass
             # print("my_thread_lock:error =",e)
         return False

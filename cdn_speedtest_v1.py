@@ -13,6 +13,7 @@ from cdn_downloader_v5 import downloader
 from cdn_downloader_v5 import download_progress
 from ping_utils import simple_mpc_ping
 from ping_utils import simple_ping
+from diy_algorithm import BinarySearchTree
 
 import pings
 import my_const
@@ -21,13 +22,13 @@ import my_const
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-02 12:08:51"
+__updated__ = "2021-03-08 14:18:30"
 __version__ = 0.1
 
 class cloudflare_cdn_tool_utils:
     ipv4_list_url = "https://www.cloudflare.com/ips-v4"
     ipv6_list_url = "https://www.cloudflare.com/ips-v6"
-    PATTERN_GET_NETWORK_ADDRESS = r"(((1\d\d|2[0-4]\d|25[0-5]|[1-9]\d|\d)\.){3}(1\d\d|2[0-4]\d|25[0-5]|[1-9]\d|\d)/([12]\d|3[012]|\d))"
+    PATTERN_GET_IPV4_NETWORK_ADDRESS = r"(((1\d\d|2[0-4]\d|25[0-5]|[1-9]\d|\d)\.){3}(1\d\d|2[0-4]\d|25[0-5]|[1-9]\d|\d)/([12]\d|3[012]|\d))"
 
     file_root = "result/"
     simple_get_best_network_latest_result_filename = "latest_result.json"
@@ -107,7 +108,7 @@ class cloudflare_cdn_tool_utils:
 
     def get_ipv4_netwrok_list(self, 
             specific_ip_address:str="1.1.1.100" ):
-        pattern = re.compile(self.PATTERN_GET_NETWORK_ADDRESS)
+        pattern = re.compile(self.PATTERN_GET_IPV4_NETWORK_ADDRESS)
         if self.prefer_use_local_blackwhitelist:
             obj = self.read_json_file(
                 filename=self.simple_get_best_network_latest_blackwhitelist_filename
@@ -129,7 +130,7 @@ class cloudflare_cdn_tool_utils:
             stream = False,
             allow_print=self.allow_print
         )
-        r = down.just_get()
+        r = down.just_get_response()
         if r == None:
             del down
             return None
@@ -507,14 +508,18 @@ class cloudflare_cdn_speedtest:
     def __init__(self, 
             url:str, 
             download_as_file:bool=False,
-            specific_range:tuple=None,
-            timeout_to_stop=10,  # int in second 
-            allow_print:bool=False ):
+            timeout_to_stop=8,  # float in second 
+            allow_print:bool=False,
+            sha256_hash_value:str=None,
+            specific_range:tuple=(0, 60 * my_const.ONE_BIN_MB) ):
         self.url:str = url
         self.download_as_file:bool = download_as_file
-        self.specific_range = specific_range
-        
         self.timeout_to_stop = timeout_to_stop
+        self.allow_print:bool = allow_print
+        self.sha256_hash_value = None
+        if (sha256_hash_value != None):
+            self.sha256_hash_value = sha256_hash_value.upper()
+        self.specific_range = specific_range
         self.tool_utils = cloudflare_cdn_tool_utils(
             allow_print=allow_print
         )
@@ -523,25 +528,43 @@ class cloudflare_cdn_speedtest:
     def get_download_obj(self):
         return downloader(
             url=self.url,
-            specific_range=self.specific_range,
             download_as_file=self.download_as_file,
-            allow_print=False 
+            # allow_print=self.allow_print,
+            allow_print=False,
+            sha256_hash_value=self.sha256_hash_value,
+            specific_range=self.specific_range
         )
 
     def just_speedtest(self, specific_ip_address:str):
+        result_dict = {}
         down = self.get_download_obj()
         down.specific_ip_address = specific_ip_address
-        down.speedtest_single_thread(timeout_to_stop=self.timeout_to_stop)
-        dp:download_progress = down.download_progress_list[0]
-        total_size = dp.curr_getsize
-        total_time = dp.duration
+        if not down.speedtest_single_thread(
+                    result_dict=result_dict, 
+                    timeout_to_stop=self.timeout_to_stop):
+            res_dict = {
+                "downloaded_size":0,
+                "downloaded_size_h":"0Byte",
+                "complete_download_count":0,
+                "duration":0,
+                "average_speed":0,
+                "average_speed_h":"0Byte/s"
+            }
+            return res_dict
+        
+        complete_download_count:int = result_dict["complete_download_count"]
+        total_size = result_dict["history_done_size"]
+        total_time = result_dict["duration"]
+        if total_time == 0:
+            total_time = self.timeout_to_stop
         average_speed = total_size / total_time
         average_speed_humanize = \
             down.get_humanize_size(size_in_byte = average_speed ) + "/s"
         res_dict = {
             "downloaded_size":total_size,
             "downloaded_size_h":down.get_humanize_size(total_size),
-            "total_time":total_time,
+            "complete_download_count":complete_download_count,
+            "duration":total_time,
             "average_speed":average_speed,
             "average_speed_h":average_speed_humanize
         }
@@ -549,7 +572,16 @@ class cloudflare_cdn_speedtest:
         return res_dict
 
     def just_test_1_0_0_0_p24_network(self):
-        ipv4_network_obj = ipaddress.IPv4Network("1.0.0.0/24")
+        return self.just_test_network("1.0.0.0/24")
+
+    def just_test_172_65_65_0_p24_network(self):
+        return self.just_test_network("172.65.65.0/24")
+
+    # def just_test_1_1_1_0_p24_network(self):
+    #     return self.just_test_network("1.1.1.0/24")
+
+    def just_test_network(self,ipv4_network_str:str):
+        ipv4_network_obj = ipaddress.IPv4Network(ipv4_network_str)
         # sub_network_iter = ipv4_network_obj.subnets(new_prefix=32)
         # a_list = [ str(item.network_address) for item in sub_network_iter ]
         # print(a_list)
@@ -564,7 +596,10 @@ class cloudflare_cdn_speedtest:
                 "major_var":{},
                 "duration_in_sec":0
             },
-            "result":{}
+            "result":{
+                "carefully_chosen":[],
+                "speedtest_result":{}
+            }
         }
         ping_task_dict = self.tool_utils.ping_scan_ipv4_subnetwork(
             network_obj=ipv4_network_obj,
@@ -577,31 +612,55 @@ class cloudflare_cdn_speedtest:
         hosts_iter = hosts_dict.keys()
         test_host_list = list(hosts_iter)
 
-        result_dict = task_dict["result"]
+        down:downloader = self.get_download_obj()
+        if self.sha256_hash_value == None:
+            if not down.main() :
+                return False
+        self.sha256_hash_value = down.sha256_hash_value
+
+        result_dict = task_dict["result"]["speedtest_result"]
         total_download_size = 0
         total_download_time = 0.0
         total_average_speed = 0.0
+        total_complete_download_count = 0
         for ip_address in test_host_list:
             tmp_speedtest_result = self.just_speedtest(
                 specific_ip_address=ip_address
             )
             result_dict[ip_address] = tmp_speedtest_result
             total_download_size += tmp_speedtest_result["downloaded_size"]
-            total_download_time += tmp_speedtest_result["total_time"]
+            total_download_time += tmp_speedtest_result["duration"]
+            total_complete_download_count += tmp_speedtest_result["complete_download_count"]
 
         took_time = time.time() - start_time
         task_dict["task_detail"]["duration_in_sec"] = took_time
         self.diy_output("Took {} seconds.".format("%.3f"%took_time) )
 
+        test_host_list_len = len(test_host_list)
         total_average_speed = total_download_size / total_download_time
+        average_complete_download_count = total_complete_download_count / test_host_list_len
         major_var_dict = task_dict["task_detail"]["major_var"]
+        major_var_dict["test_host_list_len"] = test_host_list_len
         major_var_dict["total_download_size"] = total_download_size
         major_var_dict["total_download_time"] = total_download_time
         major_var_dict["total_average_speed"] = total_average_speed
-        for ip_address in test_host_list:
+        major_var_dict["total_complete_download_count"] = total_complete_download_count
+        major_var_dict["average_complete_download_count"] = average_complete_download_count
+
+        tmp_avl_tree = BinarySearchTree()
+        carefully_chosen_list = []
+        for i in range(0, test_host_list_len):
+            ip_address = test_host_list.pop(0)
             curr_host_avg_speed = float(result_dict[ip_address]["average_speed"])
-            if curr_host_avg_speed < total_average_speed:
-                del result_dict[ip_address]
+            if curr_host_avg_speed > total_average_speed and \
+                result_dict[ip_address]["complete_download_count"] > \
+                        average_complete_download_count:
+                tmp_avl_tree.put(key=result_dict[ip_address]["downloaded_size"],
+                                val=ip_address)
+        for i in tmp_avl_tree:
+            carefully_chosen_list.append(tmp_avl_tree.get(i))
+        del tmp_avl_tree
+        task_dict["result"]["carefully_chosen"] = carefully_chosen_list
 
         self.tool_utils.write_obj_to_json_file(
             filename=None,
@@ -609,12 +668,14 @@ class cloudflare_cdn_speedtest:
             obj=task_dict
         )
 
+        return task_dict
+
+
 
     def main(self):
 
         # self.just_speedtest(str(self.network_address.next()))
         pass
-    pass
 
 
 if __name__ == "__main__":
@@ -624,15 +685,28 @@ if __name__ == "__main__":
     #                 get_blackwhitelist=True,
     #                 iterate_times=3 )
     # print(res)
+
+    # test = cloudflare_cdn_tool_utils()
+    # network_obj = ipaddress.IPv4Network("172.64.0.0/13")
+    # res = test.ping_scan_ipv4_subnetwork(
+    #     network_obj=network_obj,
+    #     end_prefixlen=24,
+    #     wirte_to_file=True)
+    # print(res)
     
-    url = "https://speed.haoren.ml/cache.jpg"
-    specific_range = (0,134217728)
+    # url = "https://speed.haoren.ml/cache.jpg"
+
+    url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
+    sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
+
     test = cloudflare_cdn_speedtest(
         url=url,
-        specific_range=specific_range,
-        download_as_file=False
+        download_as_file=False,
+        allow_print=True,
+        sha256_hash_value=sha256_hash_value
     )
-    test.just_test_1_0_0_0_p24_network()
+    test.just_test_172_65_65_0_p24_network()
+    
 
-
+    
 
