@@ -22,7 +22,7 @@ from http import HTTPStatus
 import my_const
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-07 21:23:59"
+__updated__ = "2021-03-08 17:14:54"
 __version__ = 0.5
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
@@ -782,6 +782,8 @@ class downloader:
                 ("Content-Length" in headers) and headers["Content-Length"])
             return flag
         r = simple_request(use_stream=False)
+        if r == None:
+            return None
         if content_length_exist():
             return r
         elif self.stream: # 如果服务器不允许通过head请求探测资源大小

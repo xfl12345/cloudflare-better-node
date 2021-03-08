@@ -22,7 +22,7 @@ import my_const
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-08 14:18:30"
+__updated__ = "2021-03-08 17:12:53"
 __version__ = 0.1
 
 class cloudflare_cdn_tool_utils:
@@ -574,8 +574,8 @@ class cloudflare_cdn_speedtest:
     def just_test_1_0_0_0_p24_network(self):
         return self.just_test_network("1.0.0.0/24")
 
-    def just_test_172_65_65_0_p24_network(self):
-        return self.just_test_network("172.65.65.0/24")
+    def just_test_172_64_100_0_p24_network(self):
+        return self.just_test_network("172.64.100.0/24")
 
     # def just_test_1_1_1_0_p24_network(self):
     #     return self.just_test_network("1.1.1.0/24")
@@ -613,9 +613,8 @@ class cloudflare_cdn_speedtest:
         test_host_list = list(hosts_iter)
 
         down:downloader = self.get_download_obj()
-        if self.sha256_hash_value == None:
-            if not down.main() :
-                return False
+        if self.sha256_hash_value == None and not down.main() :
+            return False
         self.sha256_hash_value = down.sha256_hash_value
 
         result_dict = task_dict["result"]["speedtest_result"]
@@ -705,7 +704,7 @@ if __name__ == "__main__":
         allow_print=True,
         sha256_hash_value=sha256_hash_value
     )
-    test.just_test_172_65_65_0_p24_network()
+    test.just_test_172_64_100_0_p24_network()
     
 
     
