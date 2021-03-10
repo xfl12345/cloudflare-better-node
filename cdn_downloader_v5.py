@@ -22,7 +22,7 @@ from http import HTTPStatus
 import my_const
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-10 11:56:24"
+__updated__ = "2021-03-10 16:14:40"
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
 class download_progress:
@@ -353,7 +353,7 @@ class downloader:
                 self.diy_output(f"request:my_thread_id={dp.my_thread_id}," + \
                     f"request time out.Retry count={retry_count * (self.max_retries +1)}, " +\
                     "known error=", e)
-                if dp.keep_get_request == False:
+                if not dp.keep_get_request:
                     break
                 retry_count = retry_count +1
                 session = self.get_session_obj()
@@ -362,7 +362,7 @@ class downloader:
                 self.diy_output(f"request:my_thread_id={dp.my_thread_id}," + \
                     f"request failed.Retry count={retry_count * (self.max_retries +1)}, " +\
                     "unknow error=", e)
-                if dp.keep_get_request == False:
+                if not dp.keep_get_request:
                     break
                 retry_count = retry_count +1
                 session = self.get_session_obj()
@@ -370,7 +370,7 @@ class downloader:
                 break
         dp.response_context = my_response
         dp.rq_chronograph.end_and_count_up()
-        if self.stream :
+        if my_response and self.stream :
             if (dp.chunk_size == 0):
                 dp.it = dp.response_context.iter_content()
             else:
@@ -389,6 +389,11 @@ class downloader:
     # 下载文件的核心函数
     def download(self, dp:download_progress):
         self.dp_get_new_response(dp=dp)
+        if dp.response_context == None:
+            self.diy_output(f"worker:my_thread_id={dp.my_thread_id}," + \
+                "request failed. Exit abnormally.")
+            dp.now_force_exit()
+            return None
         is_enforce_mode:bool = True
         if dp.getsize_strict_level != my_const.LEVEL_ENFORCE:
             is_enforce_mode = False
@@ -737,8 +742,7 @@ class downloader:
         def simple_request(use_stream:bool=False):
             request_succeed = False
             retry_count = 0
-            local_max_retries = 3
-            while retry_count < local_max_retries:
+            while True:
                 try:
                     if use_stream:
                         r = requests.get( url=self.url, 
@@ -756,11 +760,15 @@ class downloader:
                         f"request time out.Retry count={retry_count}, " +\
                         "known error=", e)
                     retry_count += 1
+                    if retry_count > self.max_retries:
+                        break
                 except Exception as e:
                     self.diy_output("get_response_with_content_length:" + \
                         f"request failed.Retry count={retry_count}, " +\
                         "unknow error=", e)
                     retry_count += 1
+                    if retry_count > self.max_retries:
+                        break
                 else:
                     request_succeed = True
                     break
@@ -868,6 +876,8 @@ class downloader:
 
     def download_init(self)->bool:
         self.diy_output("Download URL="+self.url)
+        if self.specific_ip_address :
+            self.diy_output("specific_ip_address="+self.specific_ip_address)
         self.diy_output("user_agent="+self.user_agent)
         self.download_url_init()
         if not self.download_range_init():
@@ -964,6 +974,8 @@ class downloader:
         f = self.get_file_io()
         f.seek(dp.curr_start)
         self.dp_get_new_response(dp=dp)
+        if dp.response_context == None:
+            dp.keep_run = False
         tmp_time_val = dp.now_running()
         dp.dl_chronograph.set_start_time(start=tmp_time_val)
         while dp.keep_run:
@@ -1022,7 +1034,6 @@ class downloader:
         result_dict["curr_start"] = dp.curr_start
         result_dict["curr_end"] = dp.curr_end
         result_dict["total_workload"] = dp.curr_end - dp.curr_start
-        result_dict["downloader_thread_status"] = dp.downloader_thread_status
         result_dict["my_thread_id"] = dp.my_thread_id
         if( is_not_finished() ):
             self.diy_output(f"worker:my_thread_id={dp.my_thread_id}," + \
@@ -1059,6 +1070,7 @@ class downloader:
             continue
         clock.stop()
         dp.keep_run = False
+        dp.keep_get_request = False
         self.diy_output(f"speedtest_countdown:dp my_thread_id={dp.my_thread_id},"+\
             "time is up.")
         if dp.response_context != None:
@@ -1074,6 +1086,9 @@ class downloader:
         # 拟定重复下载文件的 前 60MiB 大小分块
         # 若文件大小不足 60 MiB 则重复完整下载该文件
         self.download_as_file = False
+        self.max_retries = 1
+        self.timeout_to_retry = 1
+
         if not self.download_init():
             return False
         self.diy_output("Debug version is running.")
@@ -1085,6 +1100,7 @@ class downloader:
             end=end, 
             my_thread_id=0, 
             chunk_size=256 )
+        dp.keep_get_request = False
         self.download_progress_list = [dp]
         clock = chronograph()
         sc_thread = threading.Thread(

@@ -8,7 +8,6 @@
 ## 介绍  
 
 通过Python3来实现自动搜寻最快的Cloudflare CDN节点  
-目前只完成了下载器功能  
 
 ## TODO  
 
@@ -16,7 +15,7 @@
 + [x] 多进程  
 + [x] 循环遍历网段（算法待优化，暂未启用）  
 + [ ] MySQL数据库联动  
-+ [ ] 全自动DDNS（在做了）  
++ [x] 全自动DDNS  
 
 ## 进度
 
@@ -37,7 +36,14 @@
     4. 断点续传  
 
 + CDN 节点暴力测速器(cdn_speedtest_v1.py)  
-  在做了在做了……
+  + 已完成功能：  
+    1. 自定义深度扫描IPv4网段  
+    2. 在线拉取Cloudflare CDN节点 IPv4 网段列表  
+    3. 读写JSON，测试结果可以保存到json文件，也可以从json文件读取结果  
+    4. 基于ping测试的黑白名单  
+    5. DNSPOD 中国区 DDNS
+    6. Cloudflare DDNS  
+    7. 无脑扫描特定网段并全自动DDNS  
 
 ## 计划
 

@@ -4,6 +4,7 @@ import sys
 import time
 import json
 import ipaddress
+import collections
 import multiprocessing as mp
 import multiprocessing.connection as mpc
 import concurrent.futures as ccfutures
@@ -24,7 +25,7 @@ import my_const
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-10 11:46:08"
+__updated__ = "2021-03-10 17:51:33"
 __version__ = 0.1
 
 class cloudflare_cdn_tool_utils:
@@ -532,7 +533,7 @@ class cloudflare_cdn_speedtest:
             url=self.url,
             download_as_file=self.download_as_file,
             # allow_print=self.allow_print,
-            allow_print=False,
+            allow_print=True,
             sha256_hash_value=self.sha256_hash_value,
             specific_range=self.specific_range
         )
@@ -579,6 +580,9 @@ class cloudflare_cdn_speedtest:
     def just_test_172_65_65_0_p24_network(self):
         return self.just_test_network("172.65.65.0/24")
 
+    def just_test_104_16_100_0_p24_network(self):
+        return self.just_test_network("104.16.100.0/24")
+
     # def just_test_1_1_1_0_p24_network(self):
     #     return self.just_test_network("1.1.1.0/24")
 
@@ -594,18 +598,25 @@ class cloudflare_cdn_speedtest:
         task_dict:dict={
             "time":curr_local_time_str,
             "task_detail":{
-                "function":"just_test_1_0_0_0_p24_network",
-                "major_var":{},
+                "function":"just_test_network",
+                "major_var":{
+                    "ipv4_network_str":ipv4_network_str,
+                    "test_hosts_count":0,
+                },
                 "duration_in_sec":0
             },
             "result":{
                 "carefully_chosen":{
                     "count":0,
-                    "hosts":[]
+                    "hosts":collections.OrderedDict()
                 },
                 "normal":{
                     "count":0,
                     "hosts":{}
+                },
+                "unavailable":{
+                    "count":0,
+                    "hosts":[]
                 }
             }
         }
@@ -616,16 +627,22 @@ class cloudflare_cdn_speedtest:
             violence_mode=False
         )
         # print(ping_task_dict)
+        unreachable_hosts = list((ping_task_dict["result"]["unreachable"]["hosts"]).keys())
+        task_dict["result"]["unavailable"]["hosts"] += unreachable_hosts
+        task_dict["result"]["unavailable"]["count"] += len(unreachable_hosts)
         hosts_dict:dict = ping_task_dict["result"]["reachable"]["lowest_loss_host"]["hosts"]
         hosts_iter = hosts_dict.keys()
         test_host_list = list(hosts_iter)
+        normal_host_list = []
 
         down:downloader = self.get_download_obj()
         if self.sha256_hash_value == None and not down.main() :
             return False
         self.sha256_hash_value = down.sha256_hash_value
 
-        result_normal_dict = task_dict["result"]["normal"]["hosts"]
+        result_unavailable_dict = task_dict["result"]["unavailable"]
+        result_normal_host_dict = task_dict["result"]["normal"]["hosts"]
+        result_normal_dict = task_dict["result"]["normal"]
         total_download_size = 0
         total_download_time = 0.0
         total_average_speed = 0.0
@@ -634,7 +651,13 @@ class cloudflare_cdn_speedtest:
             tmp_speedtest_result = self.just_speedtest(
                 specific_ip_address=ip_address
             )
-            result_normal_dict[ip_address] = tmp_speedtest_result
+            if int(tmp_speedtest_result["downloaded_size"]) == 0:
+                result_unavailable_dict["hosts"].append(ip_address)
+                result_unavailable_dict["count"] += 1
+                continue
+            result_normal_host_dict[ip_address] = tmp_speedtest_result
+            normal_host_list.append(ip_address)
+            result_normal_dict["count"] += 1
             total_download_size += tmp_speedtest_result["downloaded_size"]
             total_download_time += tmp_speedtest_result["duration"]
             total_complete_download_count += tmp_speedtest_result["complete_download_count"]
@@ -644,35 +667,43 @@ class cloudflare_cdn_speedtest:
         self.diy_output("Took {} seconds.".format("%.3f"%took_time) )
 
         test_host_list_len = len(test_host_list)
-        total_average_speed = total_download_size / total_download_time
-        average_complete_download_count = total_complete_download_count / test_host_list_len
+        if test_host_list_len != 0 and result_unavailable_dict["count"] != test_host_list_len:
+            total_average_speed = total_download_size / total_download_time
+            average_complete_download_count = total_complete_download_count / test_host_list_len
+        else:
+            total_average_speed = 0
+            average_complete_download_count = 0
         major_var_dict = task_dict["task_detail"]["major_var"]
-        task_dict["result"]["normal"]["count"] = test_host_list_len
+        major_var_dict["test_hosts_count"] = test_host_list_len
         major_var_dict["total_download_size"] = total_download_size
         major_var_dict["total_download_time"] = total_download_time
         major_var_dict["total_average_speed"] = total_average_speed
         major_var_dict["total_complete_download_count"] = total_complete_download_count
         major_var_dict["average_complete_download_count"] = average_complete_download_count
 
+        del test_host_list
+
         tmp_avl_tree = BinarySearchTree()
         
-        for i in range(0, test_host_list_len):
-            ip_address = test_host_list.pop(0)
-            curr_host_avg_speed = float(result_normal_dict[ip_address]["average_speed"])
+        normal_host_list_len = len(normal_host_list)
+        for i in range(0, normal_host_list_len):
+            ip_address = normal_host_list.pop(0)
+            curr_host_avg_speed = float(result_normal_host_dict[ip_address]["average_speed"])
             if curr_host_avg_speed > total_average_speed and \
-                result_normal_dict[ip_address]["complete_download_count"] > \
+                result_normal_host_dict[ip_address]["complete_download_count"] > \
                         average_complete_download_count:
-                tmp_avl_tree.put(key=result_normal_dict[ip_address]["downloaded_size"],
+                tmp_avl_tree.put(key=result_normal_host_dict[ip_address]["downloaded_size"],
                                 val=ip_address)
-                task_dict["result"]["normal"]["count"] -= 1
+                result_normal_dict["count"] -= 1
                 task_dict["result"]["carefully_chosen"]["count"] += 1
     
-        carefully_chosen_dict = task_dict["result"]["carefully_chosen"]["hosts"]
-        for i in tmp_avl_tree:
-            ip_address = tmp_avl_tree.get(i)
-            carefully_chosen_dict[ip_address] = result_normal_dict[ip_address]
-            del result_normal_dict[ip_address]
-        del tmp_avl_tree
+        carefully_chosen_hosts_dict = task_dict["result"]["carefully_chosen"]["hosts"]
+        if len(tmp_avl_tree) > 0:
+            for i in tmp_avl_tree:
+                ip_address = tmp_avl_tree.get(i)
+                carefully_chosen_hosts_dict[ip_address] = result_normal_host_dict[ip_address]
+                del result_normal_host_dict[ip_address]
+            del tmp_avl_tree
 
         self.tool_utils.write_obj_to_json_file(
             filename=None,
@@ -684,8 +715,22 @@ class cloudflare_cdn_speedtest:
     
 
     def simple_update_ddns_to_a_better_node(self):
-        task_dict = self.just_test_172_65_65_0_p24_network()
-        
+        # task_dict =self.tool_utils.read_json_file("20210310_Wed_173228.json")
+        task_dict = self.just_test_104_16_100_0_p24_network()
+        carefully_chosen_dict = task_dict["result"]["carefully_chosen"]
+        if int(carefully_chosen_dict["count"]) == 0:
+            self.diy_output("simple_update_ddns_to_a_better_node: " +\
+                "All test node are unavailable.Mission failed.")
+            return False
+        carefully_chosen_hosts_dict = carefully_chosen_dict["hosts"]
+        carefully_chosen_hosts_list = list(carefully_chosen_hosts_dict.keys())
+        if self.update_ddns(ipv4_address=carefully_chosen_hosts_list[0]):
+            self.diy_output("simple_update_ddns_to_a_better_node: "+\
+                "Update DDNS to a better node succeed!")
+            return True
+        return False
+
+
 
     def update_ddns(self, ipv4_address, choose="cf"):
         ddns_tools = None
@@ -703,29 +748,15 @@ class cloudflare_cdn_speedtest:
 
 
 if __name__ == "__main__":
-    # test = cloudflare_cdn_tool_utils()
-    # res = test.iteration_get_best_network(
-    #                 wirte_to_file=True,
-    #                 get_blackwhitelist=True,
-    #                 iterate_times=3 )
-    # print(res)
-
-    # test = cloudflare_cdn_tool_utils()
-    # network_obj = ipaddress.IPv4Network("172.64.0.0/13")
-    # res = test.ping_scan_ipv4_subnetwork(
-    #     network_obj=network_obj,
-    #     end_prefixlen=24,
-    #     wirte_to_file=True)
-    # print(res)
     
-    url = "https://speed.haoren.ml/cache.jpg"
-    # 128 MiB version
-    sha256_hash_value = "45A3AE1D8321E9C99A5AEEA31A2993CF1E384661326C3D238FFAFA2D7451AEDB"
-    specific_range = (0,134217728)
+    # url = "https://speed.haoren.ml/cache.jpg"
+    # # 128 MiB version
+    # sha256_hash_value = "45A3AE1D8321E9C99A5AEEA31A2993CF1E384661326C3D238FFAFA2D7451AEDB"
+    # specific_range = (0,134217728)
 
-
-    # url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
-    # sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
+    url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
+    sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
+    specific_range = None
 
     test = cloudflare_cdn_speedtest(
         url=url,
@@ -734,7 +765,7 @@ if __name__ == "__main__":
         sha256_hash_value=sha256_hash_value,
         specific_range=specific_range
     )
-    test.just_test_172_65_65_0_p24_network()
+    test.simple_update_ddns_to_a_better_node()
     
 
     
