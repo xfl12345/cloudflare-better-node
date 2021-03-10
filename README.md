@@ -37,7 +37,7 @@
     4. 断点续传  
 
 + CDN 节点暴力测速器(cdn_speedtest_v1.py)  
-  Haven't started yet...
+  在做了在做了……
 
 ## 计划
 
@@ -58,10 +58,12 @@ This repo relies on the following third-party projects:
     + [csdn/downloader](https://blog.csdn.net/qq_42951560/article/details/108785802)
     + [github/forced_ip_https_adapter](https://github.com/Roadmaster/forcediphttpsadapter/blob/master/forcediphttpsadapter/adapters.py)
     + [csdn/get_file_name](https://blog.csdn.net/mbh12333/article/details/103721834)
+    + [csdn/diy_thread_lock](https://blog.csdn.net/xufulin2/article/details/113803835)
   + [cdn_speedtest_v1](cdn_speedtest_v1.py)
   + [github/pings](https://github.com/satoshi03/pings)
   + [github/headers](https://github.com/Narengowda/http_headers/blob/master/headers.py)
   + [github/dnspod_python](https://github.com/DNSPod/dnspod-python)
+  + [csdn/json_tools](https://blog.csdn.net/xufulin2/article/details/114599569)
 
 + For testing only:
   + None
