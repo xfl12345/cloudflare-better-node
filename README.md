@@ -13,10 +13,10 @@
 ## TODO  
 
 + [x] 下载器  
-+ [ ] 多进程  
-+ [ ] 循环遍历网段  
++ [x] 多进程  
++ [x] 循环遍历网段（算法待优化，暂未启用）  
 + [ ] MySQL数据库联动  
-+ [ ] 全自动DDNS  
++ [ ] 全自动DDNS（在做了）  
 
 ## 进度
 
@@ -59,7 +59,9 @@ This repo relies on the following third-party projects:
     + [github/forced_ip_https_adapter](https://github.com/Roadmaster/forcediphttpsadapter/blob/master/forcediphttpsadapter/adapters.py)
     + [csdn/get_file_name](https://blog.csdn.net/mbh12333/article/details/103721834)
   + [cdn_speedtest_v1](cdn_speedtest_v1.py)
-  + [pings](https://github.com/satoshi03/pings)
+  + [github/pings](https://github.com/satoshi03/pings)
+  + [github/headers](https://github.com/Narengowda/http_headers/blob/master/headers.py)
+  + [github/dnspod_python](https://github.com/DNSPod/dnspod-python)
 
 + For testing only:
   + None

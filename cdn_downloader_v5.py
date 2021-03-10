@@ -22,8 +22,7 @@ from http import HTTPStatus
 import my_const
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-08 17:14:54"
-__version__ = 0.5
+__updated__ = "2021-03-10 11:56:24"
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
 class download_progress:
@@ -179,14 +178,7 @@ class downloader:
             specific_range:tuple=None,
             **kwargs):
         self.timer = time.time
-        my_python_version = str(sys.version_info.major) + "." +\
-                    str(sys.version_info.minor) + "." +\
-                    str(sys.version_info.micro) # + "_" +\
-                    # str(sys.version_info.releaselevel) + "_" +\
-                    # str(sys.version_info.serial)
-        self.user_agent = "Python/" + my_python_version + " " +\
-            "python_requests/" + str(requests.__version__) + " " +\
-            f"cloudflare-better-node/{__version__} (github.com@xfl12345) "
+        self.user_agent = my_const.USER_AGENT
         self.url:str = url
         self.download_to_ram = bytearray()
         self.filename:str = self.default_filename 
