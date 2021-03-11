@@ -14,7 +14,7 @@ from cdn_downloader_v5 import downloader
 from cdn_downloader_v5 import download_progress
 from ping_utils import simple_mpc_ping
 from ping_utils import simple_ping
-from diy_algorithm import BinarySearchTree
+from diy_algorithm import BinarySearchTree, MergeSort
 from cf_ddns import cf_simple_ddns
 from dnspod_ddns import dnspod_simple_ddns
 
@@ -25,7 +25,7 @@ import my_const
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-10 17:51:33"
+__updated__ = "2021-03-12 01:46:05"
 __version__ = 0.1
 
 class cloudflare_cdn_tool_utils:
@@ -164,12 +164,14 @@ class cloudflare_cdn_tool_utils:
             return normal_or_default()
 
     def dict_mover(self, src:dict, dest:dict):
-        while True:
-            try:
-                k,v = src.popitem()
-                dest[k] = v
-            except KeyError:
-                break
+        # while True:
+        #     try:
+        #         k,v = src.popitem()
+        #         dest[k] = v
+        #     except KeyError:
+        #         break
+        dest.update(src)
+        src.clear()
 
     def get_curr_local_time_str(self, curr_local_time:time.struct_time):
         return time.strftime("TZ(%z)_Y(%Y)-M(%m)-D(%d)_%A_%H:%M:%S", curr_local_time)
@@ -254,7 +256,12 @@ class cloudflare_cdn_tool_utils:
                         ping_times      #times
                     )
                 )
-                p_result_list.append(receiver)
+                p_result_list.append(
+                    {
+                        "p":p,
+                        "receiver":receiver
+                    }
+                )
                 p_result_list_len += 1
                 p.start()
             # p_item:mp.Process
@@ -285,13 +292,20 @@ class cloudflare_cdn_tool_utils:
             # for p_asyncresult in p_asyncresult_list:
             #     p_asyncresult.wait()
         
+        tmp_avl_tree = BinarySearchTree()
 
-        for index in range(p_result_list_len):
+        # 处理ping结果
+        while p_result_list:
             if violence_mode:
-                item_mpc:mpc.Connection = p_result_list[index]
+                p_dict:dict = p_result_list.pop(0)
+                p:mp.Process = p_dict["p"]
+                if p.is_alive():
+                    p_result_list.append(p_dict)
+                    continue
+                item_mpc:mpc.Connection = p_dict["receiver"]
                 res = dict( item_mpc.recv() )
             else:
-                item_ccfut:ccfutures.Future = p_result_list[index]
+                item_ccfut:ccfutures.Future = p_result_list.pop(0)
                 res = dict( item_ccfut.result() )
             ip_addr,r = res.popitem()
             ping_result_dict["count"] += 1
@@ -683,28 +697,41 @@ class cloudflare_cdn_speedtest:
 
         del test_host_list
 
-        tmp_avl_tree = BinarySearchTree()
-        
+        tmp_carefully_chosen_list = []
+        def my_compare(a, b):
+            if a["complete_download_count"] < b["complete_download_count"]:
+                return True
+            elif a["complete_download_count"] == b["complete_download_count"]:
+                if a["average_speed"] < b["average_speed"]:
+                    return True
+                elif a["average_speed"] == b["average_speed"]:
+                    if a["duration"] > b["duration"]:
+                        return True
+            return False
+        merge_sort_obj = MergeSort(
+            my_compare=my_compare
+        )
+
         normal_host_list_len = len(normal_host_list)
         for i in range(0, normal_host_list_len):
             ip_address = normal_host_list.pop(0)
-            curr_host_avg_speed = float(result_normal_host_dict[ip_address]["average_speed"])
-            if curr_host_avg_speed > total_average_speed and \
-                result_normal_host_dict[ip_address]["complete_download_count"] > \
-                        average_complete_download_count:
-                tmp_avl_tree.put(key=result_normal_host_dict[ip_address]["downloaded_size"],
-                                val=ip_address)
-                result_normal_dict["count"] -= 1
-                task_dict["result"]["carefully_chosen"]["count"] += 1
-    
-        carefully_chosen_hosts_dict = task_dict["result"]["carefully_chosen"]["hosts"]
-        if len(tmp_avl_tree) > 0:
-            for i in tmp_avl_tree:
-                ip_address = tmp_avl_tree.get(i)
-                carefully_chosen_hosts_dict[ip_address] = result_normal_host_dict[ip_address]
-                del result_normal_host_dict[ip_address]
-            del tmp_avl_tree
+            curr_node_dict:dict = result_normal_host_dict[ip_address]
+            curr_host_avg_speed = float(curr_node_dict["average_speed"])
+            if curr_node_dict["complete_download_count"] >= average_complete_download_count and \
+                    curr_host_avg_speed >= total_average_speed :
+                    curr_node_dict["ip_address"] = ip_address
+                    tmp_carefully_chosen_list.append(curr_node_dict)
+                    del result_normal_host_dict[ip_address]
+                    result_normal_dict["count"] -= 1
+                    task_dict["result"]["carefully_chosen"]["count"] += 1
 
+        merge_sort_obj.merge_sort(tmp_carefully_chosen_list)
+        carefully_chosen_hosts_dict = task_dict["result"]["carefully_chosen"]["hosts"]
+        while tmp_carefully_chosen_list:
+            item:dict = tmp_carefully_chosen_list.pop(0)
+            ip_address = item.pop("ip_address")
+            carefully_chosen_hosts_dict[ip_address] = item
+        
         self.tool_utils.write_obj_to_json_file(
             filename=None,
             curr_local_time=self.tool_utils.get_curr_local_time(),
@@ -724,6 +751,9 @@ class cloudflare_cdn_speedtest:
             return False
         carefully_chosen_hosts_dict = carefully_chosen_dict["hosts"]
         carefully_chosen_hosts_list = list(carefully_chosen_hosts_dict.keys())
+        update_ip_address = carefully_chosen_hosts_list[0]
+        self.diy_output("simple_update_ddns_to_a_better_node: "+\
+                "Update DDNS to "+str(update_ip_address))
         if self.update_ddns(ipv4_address=carefully_chosen_hosts_list[0]):
             self.diy_output("simple_update_ddns_to_a_better_node: "+\
                 "Update DDNS to a better node succeed!")
@@ -754,8 +784,12 @@ if __name__ == "__main__":
     # sha256_hash_value = "45A3AE1D8321E9C99A5AEEA31A2993CF1E384661326C3D238FFAFA2D7451AEDB"
     # specific_range = (0,134217728)
 
-    url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
-    sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
+    # url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
+    # sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
+    # specific_range = None
+
+    url = "https://www.z4a.net/images/2017/07/20/myles-tan-91630.jpg"
+    sha256_hash_value = "A58CB1B0ACF8435F0BD06FB04093875D75F15857DFC72F691498184DBA29BBED"
     specific_range = None
 
     test = cloudflare_cdn_speedtest(
@@ -766,6 +800,13 @@ if __name__ == "__main__":
         specific_range=specific_range
     )
     test.simple_update_ddns_to_a_better_node()
+    # network_obj = ipaddress.IPv4Network("1.0.0.0/24")
+    # test.tool_utils.ping_scan_ipv4_subnetwork(
+    #     network_obj=network_obj,
+    #     end_prefixlen=32,
+    #     wirte_to_file=True,
+    #     violence_mode=False
+    # )
     
 
     

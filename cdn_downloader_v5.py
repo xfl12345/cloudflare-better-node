@@ -22,7 +22,7 @@ from http import HTTPStatus
 import my_const
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-10 16:14:40"
+__updated__ = "2021-03-12 01:50:30"
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
 class download_progress:
@@ -1078,7 +1078,7 @@ class downloader:
 
     def speedtest_single_thread(self, 
             result_dict:dict, 
-            timeout_to_stop=8):
+            timeout_to_stop=10):
         # 因为国内个人用户的 1Gbps 宽带普及率并不是很高
         # 所以假设 500Mbps 宽带可以超越全国 98% 的宽带用户
         # 经计算，欲1秒容纳500Mbps下行速率的全速下载
@@ -1135,19 +1135,22 @@ class downloader:
         return dp.response_context
 
 if __name__ == "__main__":
-    thread_num = 32
+    thread_num = 16
     specific_ip_address = "1.0.0.0"
     # specific_ip_address = "1.0.0.100"
     # specific_ip_address = None
-    sha256_hash_value = None
+    # sha256_hash_value = None
+    # specific_range = None
+    url = "https://www.z4a.net/images/2017/07/20/myles-tan-91630.jpg"
+    sha256_hash_value = "A58CB1B0ACF8435F0BD06FB04093875D75F15857DFC72F691498184DBA29BBED"
     specific_range = None
     # url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
     # sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
-    url = "https://speed.haoren.ml/cache.jpg"
+    # url = "https://speed.haoren.ml/cache.jpg"
     # sha256_hash_value = "A0D7DD06B54AFBDFB6811718337C6EB857885C489DA6304DAB1344ECC992B3DB"
     # 128 MiB version
-    sha256_hash_value = "45A3AE1D8321E9C99A5AEEA31A2993CF1E384661326C3D238FFAFA2D7451AEDB"
-    specific_range = (0,134217728)
+    # sha256_hash_value = "45A3AE1D8321E9C99A5AEEA31A2993CF1E384661326C3D238FFAFA2D7451AEDB"
+    # specific_range = (0,134217728)
     # url = "https://speed.cloudflare.com/__down?bytes=92"
     # sha256_hash_value = None
     # url = "http://127.0.0.1/download/text/123.txt"

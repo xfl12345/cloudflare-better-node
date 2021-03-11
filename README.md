@@ -9,6 +9,11 @@
 
 通过Python3来实现自动搜寻最快的Cloudflare CDN节点  
 
+## 使用方法  
+
+新建一个 `conf` 文件夹， `Cloudflare` 用户按 `cf_ddns.py` 里的顶部说明要求去补全信息，`DNSPOD` 用户按 `dnspod_ddns.py` 里的顶部说明要求去补全信息。  
+然后在这个项目的根目录，直接运行命令 `python3 ./cdn_speedtest_v1.py` 就能实现一键全自动测速并DDNS啦！  
+
 ## TODO  
 
 + [x] 下载器  

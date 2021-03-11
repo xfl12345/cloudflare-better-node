@@ -151,29 +151,34 @@ class BinarySearchTree(object):
 
 	# 创建二叉搜索树
 	def put(self, key, val):
+		swap_payload = None
 		if self.root:						#若树已经有根节点，则
-			self._put(key, val, self.root)	#从树的根开始，搜索二叉树
+			swap_payload = self._put(key, val, self.root)	#从树的根开始，搜索二叉树
 		else:								#若树没有根节点，则
 			self.root = TreeNode(key, val)	#创建一个新的TreeNode并把它作为树的根节点
 		self.size = self.size + 1 			#增加树的大小
+		return swap_payload
 
 	# 搜索树，put()的辅助函数
 	def _put(self, key, val, currentNode):
+		swap_payload = None
 		if key < currentNode.key:			#若新的键值小于当前节点键值，则搜索左子树
 			if currentNode.hasLeftChild():	#若当前节点有左子树要搜索，则
-				self._put(key, val, currentNode.leftChild)	#递归搜索左子树
+				swap_payload = self._put(key, val, currentNode.leftChild)	#递归搜索左子树
 			else:							#若当前节点无左子树要搜索，则
 				currentNode.leftChild = TreeNode(key, val, parent = currentNode)	#创建一个新的TreeNode并把它作为当前节点的左子节点
 				self.updateBalance(currentNode.leftChild)	#更新当前节点的左子节点的平衡因子
 		elif key == currentNode.key:		#若新的键值=当前节点键值，则
+			swap_payload = currentNode.payload
 			currentNode.payload = val 		#更新当前节点的有效载荷
 			self.size = self.size - 1 		#由于只修改，未增加，又因put()中+1，所以此处-1
 		else:								#若新的键值>=当前节点键值，则搜索右子树
 			if currentNode.hasRightChild():	#若当前节点有右子树要搜索，则
-				self._put(key, val, currentNode.rightChild)	#递归搜索右子树
+				swap_payload = self._put(key, val, currentNode.rightChild)	#递归搜索右子树
 			else:							#若当前节点无右子树要搜索，则
 				currentNode.rightChild = TreeNode(key, val, parent = currentNode)	#创建一个新的TreeNode并把它作为当前节点的右子节点
 				self.updateBalance(currentNode.rightChild)	#更新当前节点的右子节点的平衡因子
+		return swap_payload
 
 	# 更新平衡因子
 	def updateBalance(self, node):
@@ -370,7 +375,92 @@ class BinarySearchTree(object):
 					# 替换被删除节点的右子节点的键、有效载荷、左子节点和右子节点数据
 					currentNode.replaceNodeData(currentNode.rightChild.key, currentNode.rightChild.payload, currentNode.rightChild.leftChild, currentNode.rightChild.rightChild)
 
+# source code URL: https://www.cnblogs.com/chengxiao/p/6194356.html
+class MergeSort:
+	def __init__(self, my_compare=None):
+		if my_compare:
+			self.my_compare = my_compare
+		else:
+			self.my_compare = self.my_compare_func
+
+	def my_compare_func(self, a, b):
+		return a > b
+
+	def merge(self, left, mid, right, temp):
+		i = left        # 左序列指针
+		j = mid + 1     # 右序列指针
+		t = 0           # 临时数组指针
+
+		while i <= mid and j <= right:
+			if self.my_compare(self.arr[i], self.arr[j]):
+				temp[t] = self.arr[j]
+				j += 1
+			else:
+				temp[t] = self.arr[i]
+				i += 1
+			t += 1
+
+		# 拷贝 L[] 的保留元素
+		while i <= mid:
+			temp[t] = self.arr[i]
+			i += 1
+			t += 1
+
+		# 拷贝 R[] 的保留元素
+		while j <= right:
+			temp[t] = self.arr[j]
+			j += 1
+			t += 1
+		t = 0
+		while left <= right:
+			self.arr[left] = temp[t]
+			left += 1
+			t += 1
+
+	def merge_sort(self, arr):
+		self.arr = arr
+		right = len(self.arr)
+		temp = [0] * len(self.arr)
+		self._merge_sort(0, right -1, temp)
+
+	def _merge_sort(self, left, right, temp):
+		if left < right:
+			mid = int((left + right)/2)
+			self._merge_sort(left, mid, temp)
+			self._merge_sort(mid +1 , right, temp)
+			self.merge(left, mid, right, temp)
+
 if __name__ == "__main__":
+	merge_sort_obj = MergeSort()
+	arr = [12, 11, 13, 5, 6, 7]
+	merge_sort_obj.merge_sort(arr)
+	print(arr)
+
+	arr = [
+		{
+			"ip_addr":"1.0.0.0",
+			"speed":5000
+		},
+		{
+			"ip_addr":"1.0.0.1",
+			"speed":15000
+		},
+		{
+			"ip_addr":"1.0.0.2",
+			"speed":8000
+		},
+		{
+			"ip_addr":"1.0.0.3",
+			"speed":2000
+		}
+	]
+	merge_sort_obj = MergeSort(
+		my_compare= lambda x,y : x["speed"] < y["speed"]
+	)
+	merge_sort_obj.merge_sort(arr)
+	print(arr)
+
+
 	# mytree = BinarySearchTree()	#实例化二叉搜索树
 	# mytree[2]="yellow" 			#此例中第一个添加到mytree的索引值为2
 	# mytree[0]="red"				#通过__setitem__方法添加节点
@@ -392,11 +482,17 @@ if __name__ == "__main__":
 	# print(mytree[2])
 	# for i in mytree:			#通过两个类中的__iter__方法进行迭代
 	# 	print(i)
-	mytree = BinarySearchTree()	#实例化二叉搜索树
-	mytree.put(50, "50 A")
-	mytree.put(10, "10 B")
-	mytree.put(30, "30 C")
-	mytree.put(90, "90 D")
-	mytree.put(5, "5 E")
-	for i in mytree:
-		print(mytree.get(i))
+
+	# mytree = BinarySearchTree()	#实例化二叉搜索树
+	# mytree.put(50, "50 A")
+	# mytree.put(10, "10 B")
+	# print(mytree.put(30, "30 C"))
+	# print(mytree.put(90, "90 D"))
+	# print(mytree.put(90, "90 E"))
+	# print(mytree.put(90, "90 F"))
+	# print(mytree.put(90, "90 G"))
+	# mytree.put(5, "5 E")
+	# for i in mytree:
+	# 	print(mytree.get(i))
+
+	
