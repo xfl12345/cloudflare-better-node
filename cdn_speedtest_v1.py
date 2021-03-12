@@ -25,7 +25,7 @@ import my_const
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-12 01:46:05"
+__updated__ = "2021-03-12 16:31:31"
 __version__ = 0.1
 
 class cloudflare_cdn_tool_utils:
@@ -292,8 +292,6 @@ class cloudflare_cdn_tool_utils:
             # for p_asyncresult in p_asyncresult_list:
             #     p_asyncresult.wait()
         
-        tmp_avl_tree = BinarySearchTree()
-
         # 处理ping结果
         while p_result_list:
             if violence_mode:
@@ -528,7 +526,7 @@ class cloudflare_cdn_speedtest:
             timeout_to_stop=8,  # float in second 
             allow_print:bool=False,
             sha256_hash_value:str=None,
-            specific_range:tuple=(0, 60 * my_const.ONE_BIN_MB) ):
+            specific_range:tuple=my_const.SPEEDTEST_DEFAULT_RANGE ):
         self.url:str = url
         self.download_as_file:bool = download_as_file
         self.timeout_to_stop = timeout_to_stop
@@ -552,9 +550,10 @@ class cloudflare_cdn_speedtest:
             specific_range=self.specific_range
         )
 
-    def just_speedtest(self, specific_ip_address:str):
+    def just_speedtest(self, specific_ip_address:str, down:downloader=None):
         result_dict = {}
-        down = self.get_download_obj()
+        if down == None:
+            down = self.get_download_obj()
         down.specific_ip_address = specific_ip_address
         if not down.speedtest_single_thread(
                     result_dict=result_dict, 
@@ -585,7 +584,6 @@ class cloudflare_cdn_speedtest:
             "average_speed":average_speed,
             "average_speed_h":average_speed_humanize
         }
-        del down
         return res_dict
 
     def just_test_1_0_0_0_p24_network(self):
@@ -653,6 +651,8 @@ class cloudflare_cdn_speedtest:
         if self.sha256_hash_value == None and not down.main() :
             return False
         self.sha256_hash_value = down.sha256_hash_value
+        down.specific_ip_address = test_host_list[0]
+        down.speedtest_download_init()
 
         result_unavailable_dict = task_dict["result"]["unavailable"]
         result_normal_host_dict = task_dict["result"]["normal"]["hosts"]
@@ -663,7 +663,8 @@ class cloudflare_cdn_speedtest:
         total_complete_download_count = 0
         for ip_address in test_host_list:
             tmp_speedtest_result = self.just_speedtest(
-                specific_ip_address=ip_address
+                specific_ip_address=ip_address, 
+                down=down
             )
             if int(tmp_speedtest_result["downloaded_size"]) == 0:
                 result_unavailable_dict["hosts"].append(ip_address)
@@ -800,6 +801,7 @@ if __name__ == "__main__":
         specific_range=specific_range
     )
     test.simple_update_ddns_to_a_better_node()
+    # print(test.just_speedtest("1.0.0.0"))
     # network_obj = ipaddress.IPv4Network("1.0.0.0/24")
     # test.tool_utils.ping_scan_ipv4_subnetwork(
     #     network_obj=network_obj,

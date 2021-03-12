@@ -46,6 +46,7 @@ ONE_BIN_PB:int = 0x4000000000000    # 2^50
 
 ONE_OF_1024:float = 0.0009765625 # 1/1024
 
+SPEEDTEST_DEFAULT_RANGE = (0, 60 * ONE_BIN_MB -1)
 
 # source code URL: https://github.com/Narengowda/http_headers/blob/master/headers.py
 class HeaderFieldNames(object):

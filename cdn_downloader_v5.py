@@ -22,7 +22,7 @@ from http import HTTPStatus
 import my_const
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-12 01:50:30"
+__updated__ = "2021-03-12 16:19:13"
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
 class download_progress:
@@ -190,6 +190,7 @@ class downloader:
             if "storage_root" in kwargs:
                 self.storage_root:str = str(kwargs.pop("storage_root"))
         self.full_path_to_file:str = self.storage_root + self.filename
+        self.speedtest_download_init_is_ok:bool = False
         # 看门狗检查线程的频率，每多少秒检查一次
         self.watchdog_frequent = 5
         # 调度系统检查线程的频率，每多少秒检查一次
@@ -873,6 +874,7 @@ class downloader:
         took_time = "%.3f"%(self.timer()-start_time)
         self.diy_output("Took {} seconds.".format(took_time) )
         self.diy_output("File space allocated.")
+        self.file_space_allocated = True
 
     def download_init(self)->bool:
         self.diy_output("Download URL="+self.url)
@@ -1036,23 +1038,18 @@ class downloader:
         result_dict["total_workload"] = dp.curr_end - dp.curr_start
         result_dict["my_thread_id"] = dp.my_thread_id
         if( is_not_finished() ):
-            self.diy_output(f"worker:my_thread_id={dp.my_thread_id}," + \
-                f"start={dp.curr_start} + getsize={dp.curr_getsize} -1 != end={dp.curr_end}," + \
-                "exit abnormally.")
             dp.now_force_exit()
-            dp.dp_chronograph.set_duration(duration_val=total_time)
-            dp.dp_chronograph.set_end_time(end=end_time_val)
-            return None
-        dp.now_work_finished()
+        else:
+            dp.now_work_finished()
         dp.dp_chronograph.set_duration(duration_val=total_time)
         dp.dp_chronograph.set_end_time(end=end_time_val)
         total_size = dp.history_done_size
         average_speed = self.get_humanize_size(size_in_byte = total_size/total_time )
-        self.diy_output(f"worker:my_thread_id={dp.my_thread_id},my job had done." +\
+        self.diy_output(f"worker:my_thread_id={dp.my_thread_id}," +\
              f"Total downloaded:{self.get_humanize_size(total_size)}," +\
              f"total_time={(total_time):.3f}s,"+ \
              f"average_speed: {average_speed}/s,"+ \
-             f"retry_count={dp.retry_count}")
+             f"complete_download_count={complete_download_count}")
         # time.sleep(0.2)
         dp.now_exit()
         return None
@@ -1064,6 +1061,7 @@ class downloader:
         
         ds = dp.downloader_thread_status
         while(ds == my_const.STATUS_INIT or ds == my_const.STATUS_READY):
+            time.sleep(0.1)
             ds = dp.downloader_thread_status
         clock.start()
         while(clock.duration < timeout_to_stop):
@@ -1075,6 +1073,17 @@ class downloader:
             "time is up.")
         if dp.response_context != None:
             dp.response_context.raw._fp.close()
+
+    def speedtest_download_init(self)->bool:
+        if not self.speedtest_download_init_is_ok:
+            self.diy_output("Download URL="+self.url)
+            self.diy_output("user_agent="+self.user_agent)
+            self.download_url_init()
+            if not self.download_range_init():
+                return False
+            self.download_file_space_allocation()
+            self.speedtest_download_init_is_ok = True
+        return True
 
     def speedtest_single_thread(self, 
             result_dict:dict, 
@@ -1088,8 +1097,12 @@ class downloader:
         self.download_as_file = False
         self.max_retries = 1
         self.timeout_to_retry = 1
-
-        if not self.download_init():
+        if self.specific_range == None:
+            self.specific_range = my_const.SPEEDTEST_DEFAULT_RANGE 
+            
+        if self.specific_ip_address :
+                self.diy_output("specific_ip_address="+self.specific_ip_address)
+        if not self.speedtest_download_init():
             return False
         self.diy_output("Debug version is running.")
         self.diy_output("Starting speedtest...")
@@ -1146,10 +1159,10 @@ if __name__ == "__main__":
     specific_range = None
     # url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
     # sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
-    # url = "https://speed.haoren.ml/cache.jpg"
-    # sha256_hash_value = "A0D7DD06B54AFBDFB6811718337C6EB857885C489DA6304DAB1344ECC992B3DB"
-    # 128 MiB version
-    # sha256_hash_value = "45A3AE1D8321E9C99A5AEEA31A2993CF1E384661326C3D238FFAFA2D7451AEDB"
+    url = "https://cf.xiu2.xyz/Github/CloudflareSpeedTest.png"
+    sha256_hash_value = "17A88AF83717F68B8BD97873FFCF022C8AED703416FE9B08E0FA9E3287692BF0"
+    ### 128 MiB version
+    # sha256_hash_value = "254BCC3FC4F27172636DF4BF32DE9F107F620D559B20D760197E452B97453917"
     # specific_range = (0,134217728)
     # url = "https://speed.cloudflare.com/__down?bytes=92"
     # sha256_hash_value = None

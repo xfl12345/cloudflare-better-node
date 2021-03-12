@@ -8,12 +8,21 @@ import conf.dnspod_ddns_conf as dnspod_conf
 
 """
 
-The constant follow is necessary to be set correctly in file "conf/dnspod_ddns_conf.py":
+更多信息请访问：
+https://support.dnspod.cn/Kb/showarticle/tsid/227/
+
+"conf" 文件夹下的 "dnspod_ddns_conf.py" 文件必须包含如下内容:
+
 # This is a example.
 login_id = "1234567"
 login_token = login_id + "," + "s5a1d6a5s1d56s1ad6a1sd5asd1"
 domain = "example@example.com"
 aim_subdomain = "diy_a_subdomain"
+
+从 https://support.dnspod.cn/Kb/showarticle/tsid/227 里截取的部分资料：
+login_token 需要用 ID 和 Token 这两个字段来组合成一个完整的 Token，组合方式为："ID,Token"（用英文半角逗号分割），比如 ID 为：13490,ToKen为：6b5976c68aba5b14a0558b77c17c3932。即完整的 Token 为：13490,6b5976c68aba5b14a0558b77c17c3932 。得到完整的 Token 之后，调用方式如下：
+
+curl https://dnsapi.cn/Domain.List -d "login_token=13490,6b5976c68aba5b14a0558b77c17c3932&format=json"
 
 """
 
