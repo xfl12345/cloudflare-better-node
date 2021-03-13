@@ -22,7 +22,7 @@ from http import HTTPStatus
 import my_const
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-13 14:31:09"
+__updated__ = "2021-03-13 15:27:51"
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
 class download_progress:
@@ -1044,7 +1044,10 @@ class downloader:
         dp.dp_chronograph.set_duration(duration_val=total_time)
         dp.dp_chronograph.set_end_time(end=end_time_val)
         total_size = dp.history_done_size
-        average_speed = self.get_humanize_size(size_in_byte = total_size/total_time )
+        if total_time == 0:
+            average_speed = self.get_humanize_size(size_in_byte = 0)
+        else:
+            average_speed = self.get_humanize_size(size_in_byte = total_size/total_time )
         self.diy_output(f"worker:my_thread_id={dp.my_thread_id}," +\
              f"Total downloaded:{self.get_humanize_size(total_size)}," +\
              f"total_time={(total_time):.3f}s,"+ \

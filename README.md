@@ -71,10 +71,10 @@ This repo relies on the following third-party projects:
     + [csdn/get_file_name](https://blog.csdn.net/mbh12333/article/details/103721834)
     + [csdn/diy_thread_lock](https://blog.csdn.net/xufulin2/article/details/113803835)
   + [cdn_speedtest_v1](cdn_speedtest_v1.py)
-  + [github/pings](https://github.com/satoshi03/pings)
-  + [github/headers](https://github.com/Narengowda/http_headers/blob/master/headers.py)
-  + [github/dnspod_python](https://github.com/DNSPod/dnspod-python)
-  + [csdn/json_tools](https://blog.csdn.net/xufulin2/article/details/114599569)
+    + [github/pings](https://github.com/satoshi03/pings)
+    + [github/headers](https://github.com/Narengowda/http_headers/blob/master/headers.py)
+    + [github/dnspod_python](https://github.com/DNSPod/dnspod-python)
+    + [csdn/json_tools](https://blog.csdn.net/xufulin2/article/details/114599569)
 
 + For testing only:
   + None
