@@ -22,7 +22,7 @@ from http import HTTPStatus
 import my_const
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-12 16:19:13"
+__updated__ = "2021-03-13 14:31:09"
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
 class download_progress:
@@ -812,7 +812,7 @@ class downloader:
         self.diy_output("Vaild response received.")
         self.origin_size = int(r.headers["Content-Length"])
         if self.specific_range == None:
-            self.specific_range = (0, self.origin_size)
+            self.specific_range = (0, self.origin_size -1)
             self.total_workload = self.origin_size
             return True
         if isinstance(self.specific_range, tuple) and \
@@ -824,9 +824,9 @@ class downloader:
                 if start <= end and \
                     start < self.origin_size and \
                     end <= self.origin_size:
-                    self.total_workload = end - start
+                    self.total_workload = end - start +1
                     return True
-        self.specific_range = (0, self.origin_size)
+        self.specific_range = (0, self.origin_size -1)
         self.total_workload = self.origin_size
         self.diy_output("specific_range parameter is illegal! "+\
             "Download size had been set to origin size.")
@@ -911,13 +911,13 @@ class downloader:
         self.diy_output("Starting download...")
         self.download_tp = ThreadPoolExecutor(max_workers=self.thread_num)
         start = self.specific_range[0]
-        total_workload = self.specific_range[1] - self.specific_range[0]
+        total_workload = self.specific_range[1] - self.specific_range[0] +1
         part_size = int(total_workload / self.thread_num)
         self.download_status = my_const.DL_RUNNING
         start_time = self.timer()
         for i in range(self.thread_num):
             if(i+1 == self.thread_num):
-                end = self.specific_range[1] -1
+                end = self.specific_range[1]
             else:
                 end = (i+1) * part_size -1
             dp = download_progress(start=start, end=end, my_thread_id=i, chunk_size=256 )
@@ -1107,7 +1107,7 @@ class downloader:
         self.diy_output("Debug version is running.")
         self.diy_output("Starting speedtest...")
         start = self.specific_range[0]
-        end = self.specific_range[1] -1
+        end = self.specific_range[1]
         dp = download_progress(
             start=start, 
             end=end, 
@@ -1152,18 +1152,22 @@ if __name__ == "__main__":
     specific_ip_address = "1.0.0.0"
     # specific_ip_address = "1.0.0.100"
     # specific_ip_address = None
-    # sha256_hash_value = None
-    # specific_range = None
-    url = "https://www.z4a.net/images/2017/07/20/myles-tan-91630.jpg"
-    sha256_hash_value = "A58CB1B0ACF8435F0BD06FB04093875D75F15857DFC72F691498184DBA29BBED"
+    sha256_hash_value = None
     specific_range = None
+    # url = "https://www.z4a.net/images/2017/07/20/myles-tan-91630.jpg"
+    # sha256_hash_value = "A58CB1B0ACF8435F0BD06FB04093875D75F15857DFC72F691498184DBA29BBED"
+    # specific_range = None
     # url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
     # sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
     url = "https://cf.xiu2.xyz/Github/CloudflareSpeedTest.png"
-    sha256_hash_value = "17A88AF83717F68B8BD97873FFCF022C8AED703416FE9B08E0FA9E3287692BF0"
-    ### 128 MiB version
+    # sha256_hash_value = "17A88AF83717F68B8BD97873FFCF022C8AED703416FE9B08E0FA9E3287692BF0"
+    # specific_range = (0, 128 * my_const.ONE_BIN_MB -1)
+    # ###### 128 MiB version
     # sha256_hash_value = "254BCC3FC4F27172636DF4BF32DE9F107F620D559B20D760197E452B97453917"
-    # specific_range = (0,134217728)
+    specific_range = (0, 60 * my_const.ONE_BIN_MB -1)
+    ###### 60 MiB version
+    sha256_hash_value = "CF5AC69CA412F9B3B1A8B8DE27D368C5C05ED4B1B6AA40E6C38D9CBF23711342"
+
     # url = "https://speed.cloudflare.com/__down?bytes=92"
     # sha256_hash_value = None
     # url = "http://127.0.0.1/download/text/123.txt"

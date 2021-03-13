@@ -25,7 +25,7 @@ import my_const
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-12 16:51:50"
+__updated__ = "2021-03-13 12:01:40"
 __version__ = 0.1
 
 class cloudflare_cdn_tool_utils:
@@ -523,7 +523,7 @@ class cloudflare_cdn_speedtest:
     def __init__(self, 
             url:str, 
             download_as_file:bool=False,
-            timeout_to_stop=8,  # float in second 
+            timeout_to_stop=20,  # float in second 
             allow_print:bool=False,
             sha256_hash_value:str=None,
             specific_range:tuple=my_const.SPEEDTEST_DEFAULT_RANGE ):
