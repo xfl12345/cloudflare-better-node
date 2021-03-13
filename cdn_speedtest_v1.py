@@ -25,7 +25,7 @@ import my_const
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-13 15:54:43"
+__updated__ = "2021-03-13 16:14:46"
 __version__ = 0.1
 
 class cloudflare_cdn_tool_utils:
@@ -642,7 +642,7 @@ class cloudflare_cdn_speedtest:
             network_obj=ipv4_network_obj,
             end_prefixlen=32,
             wirte_to_file=True,
-            violence_mode=False
+            violence_mode=True
         )
         # print(ping_task_dict)
         unreachable_hosts = list((ping_task_dict["result"]["unreachable"]["hosts"]).keys())
@@ -749,7 +749,7 @@ class cloudflare_cdn_speedtest:
 
     def simple_update_ddns_to_a_better_node(self):
         # task_dict =self.tool_utils.read_json_file("20210310_Wed_173228.json")
-        task_dict = self.just_test_104_16_100_0_p24_network()
+        task_dict = self.just_test_172_64_100_0_p24_network()
         carefully_chosen_dict = task_dict["result"]["carefully_chosen"]
         if int(carefully_chosen_dict["count"]) == 0:
             self.diy_output("simple_update_ddns_to_a_better_node: " +\
@@ -806,7 +806,7 @@ if __name__ == "__main__":
     # ###### 128 MiB version
     # sha256_hash_value = "254BCC3FC4F27172636DF4BF32DE9F107F620D559B20D760197E452B97453917"
     # specific_range = (0, 60 * my_const.ONE_BIN_MB -1)
-    ###### 60 MiB version
+    # ###### 60 MiB version
     # sha256_hash_value = "CF5AC69CA412F9B3B1A8B8DE27D368C5C05ED4B1B6AA40E6C38D9CBF23711342"
 
     test = cloudflare_cdn_speedtest(

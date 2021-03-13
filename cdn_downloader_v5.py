@@ -22,7 +22,7 @@ from http import HTTPStatus
 import my_const
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-13 15:27:51"
+__updated__ = "2021-03-13 16:26:40"
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
 class download_progress:
@@ -1067,15 +1067,16 @@ class downloader:
             time.sleep(0.1)
             ds = dp.downloader_thread_status
         clock.start()
-        while(clock.duration < timeout_to_stop):
-            continue
+        while(clock.duration < timeout_to_stop and ds == my_const.STATUS_RUNNING):
+            ds = dp.downloader_thread_status
         clock.stop()
-        dp.keep_run = False
-        dp.keep_get_request = False
-        self.diy_output(f"speedtest_countdown:dp my_thread_id={dp.my_thread_id},"+\
-            "time is up.")
-        if dp.response_context != None:
-            dp.response_context.raw._fp.close()
+        if dp.downloader_thread_status == my_const.STATUS_RUNNING:
+            dp.keep_run = False
+            dp.keep_get_request = False
+            self.diy_output(f"speedtest_countdown:dp my_thread_id={dp.my_thread_id},"+\
+                "time is up.")
+            if dp.response_context != None:
+                dp.response_context.raw._fp.close()
 
     def speedtest_download_init(self)->bool:
         if not self.speedtest_download_init_is_ok:
@@ -1132,6 +1133,7 @@ class downloader:
         speedtest_thread.start()
         # self.speedtest_download(dp)
         speedtest_thread.join()
+        sc_thread.join()
         return True
 
     def just_get_response(self, timeout_to_stop = None)->Response:
@@ -1157,19 +1159,19 @@ if __name__ == "__main__":
     # specific_ip_address = None
     sha256_hash_value = None
     specific_range = None
-    # url = "https://www.z4a.net/images/2017/07/20/myles-tan-91630.jpg"
-    # sha256_hash_value = "A58CB1B0ACF8435F0BD06FB04093875D75F15857DFC72F691498184DBA29BBED"
-    # specific_range = None
+    url = "https://www.z4a.net/images/2017/07/20/myles-tan-91630.jpg"
+    sha256_hash_value = "A58CB1B0ACF8435F0BD06FB04093875D75F15857DFC72F691498184DBA29BBED"
+    specific_range = None
     # url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
     # sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
-    url = "https://cf.xiu2.xyz/Github/CloudflareSpeedTest.png"
-    # sha256_hash_value = "17A88AF83717F68B8BD97873FFCF022C8AED703416FE9B08E0FA9E3287692BF0"
-    # specific_range = (0, 128 * my_const.ONE_BIN_MB -1)
-    # ###### 128 MiB version
-    # sha256_hash_value = "254BCC3FC4F27172636DF4BF32DE9F107F620D559B20D760197E452B97453917"
-    specific_range = (0, 60 * my_const.ONE_BIN_MB -1)
-    ###### 60 MiB version
-    sha256_hash_value = "CF5AC69CA412F9B3B1A8B8DE27D368C5C05ED4B1B6AA40E6C38D9CBF23711342"
+    # url = "https://cf.xiu2.xyz/Github/CloudflareSpeedTest.png"
+    # # sha256_hash_value = "17A88AF83717F68B8BD97873FFCF022C8AED703416FE9B08E0FA9E3287692BF0"
+    # # specific_range = (0, 128 * my_const.ONE_BIN_MB -1)
+    # # ###### 128 MiB version
+    # # sha256_hash_value = "254BCC3FC4F27172636DF4BF32DE9F107F620D559B20D760197E452B97453917"
+    # specific_range = (0, 60 * my_const.ONE_BIN_MB -1)
+    # ###### 60 MiB version
+    # sha256_hash_value = "CF5AC69CA412F9B3B1A8B8DE27D368C5C05ED4B1B6AA40E6C38D9CBF23711342"
 
     # url = "https://speed.cloudflare.com/__down?bytes=92"
     # sha256_hash_value = None

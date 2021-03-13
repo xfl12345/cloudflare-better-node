@@ -1,7 +1,7 @@
 import sys
 import requests
 
-__version__ = "0.5"
+__version__ = "0.6"
 
 MY_PYTHON_VERSION = str(sys.version_info.major) + "." +\
                     str(sys.version_info.minor) + "." +\
