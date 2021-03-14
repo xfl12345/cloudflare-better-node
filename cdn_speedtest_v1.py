@@ -25,7 +25,7 @@ import my_const
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-13 16:14:46"
+__updated__ = "2021-03-14 12:47:54"
 __version__ = 0.1
 
 class cloudflare_cdn_tool_utils:
@@ -652,6 +652,14 @@ class cloudflare_cdn_speedtest:
         hosts_iter = hosts_dict.keys()
         test_host_list = list(hosts_iter)
         normal_host_list = []
+
+        if len(test_host_list) == 0:
+            self.tool_utils.write_obj_to_json_file(
+                filename=None,
+                curr_local_time=self.tool_utils.get_curr_local_time(),
+                obj=task_dict
+            )
+            return task_dict
 
         down:downloader = self.get_download_obj()
         if self.sha256_hash_value == None and not down.main() :
