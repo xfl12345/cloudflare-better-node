@@ -22,7 +22,7 @@ from http import HTTPStatus
 import my_const
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-17 19:42:49"
+__updated__ = "2021-03-17 19:55:03"
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
 class download_progress:
@@ -1006,7 +1006,8 @@ class downloader:
                     dp.curr_getsize += chunk_data_len
                     f.write(chunk_data)
                 except StopIteration:
-                    dp.it.close()
+                    if dp.it:
+                        dp.it.close()
                     self.diy_output(f"worker:my_thread_id={dp.my_thread_id}," +\
                         "known error=did not finish but could not download.")
                     break
@@ -1084,6 +1085,7 @@ class downloader:
             ds = dp.downloader_thread_status
         clock.start()
         while(clock.duration < timeout_to_stop and ds == my_const.STATUS_RUNNING):
+            time.sleep(0.1)
             ds = dp.downloader_thread_status
         clock.stop()
         if dp.downloader_thread_status == my_const.STATUS_RUNNING:

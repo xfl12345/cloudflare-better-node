@@ -25,7 +25,7 @@ import my_const
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-17 19:46:14"
+__updated__ = "2021-03-17 20:37:13"
 __version__ = 0.1
 
 class cloudflare_cdn_tool_utils:
@@ -757,7 +757,8 @@ class cloudflare_cdn_speedtest:
 
     def simple_update_ddns_to_a_better_node(self):
         # task_dict =self.tool_utils.read_json_file("20210310_Wed_173228.json")
-        task_dict = self.just_test_172_64_100_0_p24_network()
+        # task_dict = self.just_test_172_64_100_0_p24_network()
+        task_dict = self.just_test_104_16_100_0_p24_network()
         carefully_chosen_dict = task_dict["result"]["carefully_chosen"]
         if int(carefully_chosen_dict["count"]) == 0:
             self.diy_output("simple_update_ddns_to_a_better_node: " +\
@@ -804,20 +805,20 @@ if __name__ == "__main__":
     # sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
     # specific_range = None
 
-    # url = "https://www.z4a.net/images/2017/07/20/myles-tan-91630.jpg"
-    # sha256_hash_value = "A58CB1B0ACF8435F0BD06FB04093875D75F15857DFC72F691498184DBA29BBED"
-    # specific_range = None
+    url = "https://www.z4a.net/images/2017/07/20/myles-tan-91630.jpg"
+    sha256_hash_value = "A58CB1B0ACF8435F0BD06FB04093875D75F15857DFC72F691498184DBA29BBED"
+    specific_range = None
 
-    url = "https://cf.xiu2.xyz/Github/CloudflareSpeedTest.png"
-    sha256_hash_value = "17A88AF83717F68B8BD97873FFCF022C8AED703416FE9B08E0FA9E3287692BF0"
+    # url = "https://cf.xiu2.xyz/Github/CloudflareSpeedTest.png"
+    # sha256_hash_value = "17A88AF83717F68B8BD97873FFCF022C8AED703416FE9B08E0FA9E3287692BF0"
 
     # ###### 128 MiB version
     # specific_range = (0, 128 * my_const.ONE_BIN_MB -1)
     # sha256_hash_value = "254BCC3FC4F27172636DF4BF32DE9F107F620D559B20D760197E452B97453917"
 
-    ###### 60 MiB version
-    specific_range = (0, 60 * my_const.ONE_BIN_MB -1)
-    sha256_hash_value = "CF5AC69CA412F9B3B1A8B8DE27D368C5C05ED4B1B6AA40E6C38D9CBF23711342"
+    # ###### 60 MiB version
+    # specific_range = (0, 60 * my_const.ONE_BIN_MB -1)
+    # sha256_hash_value = "CF5AC69CA412F9B3B1A8B8DE27D368C5C05ED4B1B6AA40E6C38D9CBF23711342"
 
     test = cloudflare_cdn_speedtest(
         url=url,
