@@ -22,7 +22,7 @@ from http import HTTPStatus
 import my_const
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-17 17:14:54"
+__updated__ = "2021-03-17 17:11:14"
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
 class download_progress:
@@ -219,7 +219,7 @@ class downloader:
         if "chunk_size" in kwargs:
             self.chunk_size = int(kwargs.pop("chunk_size"))
         else:
-            self.chunk_size = 32 * my_const.ONE_BIN_KB
+            self.chunk_size = 512 * my_const.ONE_BIN_KB
 
         self.kwargs = kwargs
 
@@ -632,6 +632,7 @@ class downloader:
             dp.now_init()
             self.chunk_download_retry_init(dp=dp)
             dp.keep_run = True
+            dp.keep_get_request = True
             self.diy_output("schedule:Resubmit a worker,"+\
                 f"my_thread_id={dp.my_thread_id},"+\
                 f"start_from={dp.curr_start}," + \
@@ -728,6 +729,7 @@ class downloader:
                     dp.history_getsize = dp.curr_getsize
                     dp.last_check_time = self.timer()
                     continue
+                dp.keep_get_request = False
                 if dp.keep_run :
                     self.diy_output(f"watchdog:thread_id={dp.my_thread_id},"+\
                         f"had blocked over {self.watchdog_frequent} seconds!"+\
@@ -738,7 +740,6 @@ class downloader:
                         "failed to terminate!"+\
                         f"tracker={dp.running_status_tracker},"+\
                         f"Retrying...{' '*30}")
-
                     try:
                         dp.response_context.raw._fp.close()
                         dp.hack_send_close_signal_count += 1
@@ -1108,6 +1109,7 @@ class downloader:
         # 拟定重复下载文件的 前 60MiB 大小分块
         # 若文件大小不足 60 MiB 则重复完整下载该文件
         self.download_as_file = False
+        # self.use_watchdog = False
         self.max_retries = 1
         self.timeout_to_retry = 1
         if self.specific_range == None:
@@ -1193,6 +1195,7 @@ if __name__ == "__main__":
         sha256_hash_value=sha256_hash_value,
         specific_range=specific_range,
         download_as_file=False,
+        chunk_size = 512 * my_const.ONE_BIN_KB,
         allow_print = True )
     down.main()
     

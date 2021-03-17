@@ -25,7 +25,7 @@ import my_const
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-17 17:14:36"
+__updated__ = "2021-03-14 12:47:54"
 __version__ = 0.1
 
 class cloudflare_cdn_tool_utils:
