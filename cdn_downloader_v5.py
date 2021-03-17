@@ -22,7 +22,7 @@ from http import HTTPStatus
 import my_const
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-17 15:15:27"
+__updated__ = "2021-03-17 17:14:54"
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
 class download_progress:
