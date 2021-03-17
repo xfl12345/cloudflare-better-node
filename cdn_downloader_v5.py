@@ -22,7 +22,7 @@ from http import HTTPStatus
 import my_const
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-17 17:11:14"
+__updated__ = "2021-03-17 19:42:49"
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
 class download_progress:
@@ -1038,6 +1038,15 @@ class downloader:
         clock.stop()
         f.close()
         dp.history_done_size += dp.curr_getsize
+        if( is_not_finished() ):
+            dp.now_force_exit()
+        else:
+            complete_download_count += 1
+            if first_hash_value == None:
+                first_hash_value = self.compute_sha256_hash()
+            elif first_hash_value != self.compute_sha256_hash():
+                complete_download_count -= 1
+            dp.now_work_finished()
         if first_hash_value_is_none and complete_download_count == 1:
             complete_download_count = 0
         result_dict["duration"] = total_time
@@ -1047,10 +1056,7 @@ class downloader:
         result_dict["curr_end"] = dp.curr_end
         result_dict["total_workload"] = dp.curr_end - dp.curr_start
         result_dict["my_thread_id"] = dp.my_thread_id
-        if( is_not_finished() ):
-            dp.now_force_exit()
-        else:
-            dp.now_work_finished()
+        
         dp.dp_chronograph.set_duration(duration_val=total_time)
         dp.dp_chronograph.set_end_time(end=end_time_val)
         total_size = dp.history_done_size
