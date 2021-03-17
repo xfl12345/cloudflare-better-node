@@ -22,7 +22,7 @@ from http import HTTPStatus
 import my_const
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-13 16:26:40"
+__updated__ = "2021-03-17 15:15:27"
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
 class download_progress:
@@ -104,6 +104,11 @@ class download_progress:
         self.last_check_time = self.timer()
         self.downloader_thread_status = my_const.STATUS_RUNNING
         return tmp_time_val
+
+    # def now_pause(self):
+    #     tmp_time_val = self.timer()
+    #     self.downloader_thread_status = my_const.STATUS_PAUSE
+    #     return tmp_time_val
 
     def now_work_finished(self):
         self.downloader_thread_status = my_const.STATUS_WORK_FINISHED
@@ -210,6 +215,11 @@ class downloader:
 
         if "allow_print" in kwargs:
             self.allow_print = bool(kwargs.pop("allow_print"))
+
+        if "chunk_size" in kwargs:
+            self.chunk_size = int(kwargs.pop("chunk_size"))
+        else:
+            self.chunk_size = 32 * my_const.ONE_BIN_KB
 
         self.kwargs = kwargs
 
@@ -920,7 +930,7 @@ class downloader:
                 end = self.specific_range[1]
             else:
                 end = (i+1) * part_size -1
-            dp = download_progress(start=start, end=end, my_thread_id=i, chunk_size=256 )
+            dp = download_progress(start=start, end=end, my_thread_id=i, chunk_size=self.chunk_size )
             self.download_progress_list.append(dp)
             future = self.download_tp.submit(self.download, dp=dp)
             self.diy_output(f"Submit a worker,my_thread_id={i},start_from={start},end_at={end},"+\
@@ -1019,12 +1029,11 @@ class downloader:
                 dp.history_done_size += dp.curr_getsize
                 dp.curr_getsize = 0
                 clock.go_on()
-                self.dp_get_new_response(dp=dp)
+                self.dp_get_new_response(dp=dp, status_control=False)
                 dp.now_running()
                 dp.dl_chronograph.set_start_time()
-        dp.dl_chronograph.duration_count_up()
-        end_time_val = dp.dp_chronograph.end_and_count_up()
-        total_time = dp.dp_chronograph.duration
+        end_time_val = dp.dl_chronograph.duration_count_up()
+        total_time = dp.dl_chronograph.duration
         clock.stop()
         f.close()
         dp.history_done_size += dp.curr_getsize
@@ -1116,7 +1125,7 @@ class downloader:
             start=start, 
             end=end, 
             my_thread_id=0, 
-            chunk_size=256 )
+            chunk_size=self.chunk_size )
         dp.keep_get_request = False
         self.download_progress_list = [dp]
         clock = chronograph()
@@ -1159,18 +1168,18 @@ if __name__ == "__main__":
     # specific_ip_address = None
     sha256_hash_value = None
     specific_range = None
-    url = "https://www.z4a.net/images/2017/07/20/myles-tan-91630.jpg"
-    sha256_hash_value = "A58CB1B0ACF8435F0BD06FB04093875D75F15857DFC72F691498184DBA29BBED"
+    # url = "https://www.z4a.net/images/2017/07/20/myles-tan-91630.jpg"
+    # sha256_hash_value = "A58CB1B0ACF8435F0BD06FB04093875D75F15857DFC72F691498184DBA29BBED"
     specific_range = None
     # url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
     # sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
-    # url = "https://cf.xiu2.xyz/Github/CloudflareSpeedTest.png"
-    # # sha256_hash_value = "17A88AF83717F68B8BD97873FFCF022C8AED703416FE9B08E0FA9E3287692BF0"
-    # # specific_range = (0, 128 * my_const.ONE_BIN_MB -1)
-    # # ###### 128 MiB version
-    # # sha256_hash_value = "254BCC3FC4F27172636DF4BF32DE9F107F620D559B20D760197E452B97453917"
-    # specific_range = (0, 60 * my_const.ONE_BIN_MB -1)
+    url = "https://cf.xiu2.xyz/Github/CloudflareSpeedTest.png"
+    # sha256_hash_value = "17A88AF83717F68B8BD97873FFCF022C8AED703416FE9B08E0FA9E3287692BF0"
+    ###### 128 MiB version
+    specific_range = (0, 128 * my_const.ONE_BIN_MB -1)
+    sha256_hash_value = "254BCC3FC4F27172636DF4BF32DE9F107F620D559B20D760197E452B97453917"
     # ###### 60 MiB version
+    # specific_range = (0, 60 * my_const.ONE_BIN_MB -1)
     # sha256_hash_value = "CF5AC69CA412F9B3B1A8B8DE27D368C5C05ED4B1B6AA40E6C38D9CBF23711342"
 
     # url = "https://speed.cloudflare.com/__down?bytes=92"
