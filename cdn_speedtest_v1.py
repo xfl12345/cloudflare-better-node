@@ -25,7 +25,7 @@ import my_const
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-17 20:37:13"
+__updated__ = "2021-03-18 10:24:05"
 __version__ = 0.1
 
 class cloudflare_cdn_tool_utils:
@@ -758,7 +758,7 @@ class cloudflare_cdn_speedtest:
     def simple_update_ddns_to_a_better_node(self):
         # task_dict =self.tool_utils.read_json_file("20210310_Wed_173228.json")
         # task_dict = self.just_test_172_64_100_0_p24_network()
-        task_dict = self.just_test_104_16_100_0_p24_network()
+        task_dict = self.just_test_1_1_1_0_p24_network()
         carefully_chosen_dict = task_dict["result"]["carefully_chosen"]
         if int(carefully_chosen_dict["count"]) == 0:
             self.diy_output("simple_update_ddns_to_a_better_node: " +\
