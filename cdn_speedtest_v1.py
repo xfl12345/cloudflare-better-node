@@ -25,7 +25,7 @@ import my_const
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-04-06 13:30:37"
+__updated__ = "2021-04-06 15:01:05"
 __version__ = 0.1
 
 class cloudflare_cdn_tool_utils:
@@ -756,8 +756,6 @@ class cloudflare_cdn_speedtest:
         return task_dict
 
     def simple_update_ddns_to_a_better_node(self, choose="cf"):
-        # task_dict =self.tool_utils.read_json_file("20210310_Wed_173228.json")
-        # task_dict = self.just_test_172_64_100_0_p24_network()
         my_func_name = "simple_update_ddns_to_a_better_node"
         curr_local_time = self.tool_utils.get_curr_local_time()
         curr_local_time_str = self.tool_utils.get_curr_local_time_str(
@@ -768,50 +766,50 @@ class cloudflare_cdn_speedtest:
             "task_detail":{
                 "function": my_func_name,
                 "major_var":{
+                    "update_ip_address":"",
                     "message":"",
                     "success":False
                 },
                 "duration_in_sec":0
             },
-            "result":{
+            "response":{
             }
         }
         task_dict_major_var_dict:dict = task_dict["task_detail"]["major_var"]
         speedtest_task_dict = self.just_test_1_1_1_0_p24_network()
+        # speedtest_task_dict = self.tool_utils.read_json_file("20210406_Tue_142629.json")
         carefully_chosen_dict = speedtest_task_dict["result"]["carefully_chosen"]
         if int(carefully_chosen_dict["count"]) == 0:
+            task_dict_major_var_dict["success"] = False
             mess = my_func_name + ": " +\
                 "All test node are unavailable.Mission failed."
-            self.diy_output(mess)
             task_dict_major_var_dict["message"] += mess + "\n"
-            task_dict_major_var_dict["success"] = False
+            self.diy_output(mess)
         else:
             carefully_chosen_hosts_dict = carefully_chosen_dict["hosts"]
             carefully_chosen_hosts_list = list(carefully_chosen_hosts_dict.keys())
             update_ip_address = carefully_chosen_hosts_list[0]
+            task_dict_major_var_dict["update_ip_address"] = update_ip_address
             mess = my_func_name + ": " + "Update DDNS to "+str(update_ip_address)
-            self.diy_output(mess)
             task_dict_major_var_dict["message"] += mess + "\n"
+            self.diy_output(mess)
             curr_best_node_ip_address = carefully_chosen_hosts_list[0]
 
             if choose == "cf":
                 ddns_tools = cf_simple_ddns(specific_ip_address = curr_best_node_ip_address)
-                res = ddns_tools.simple_update_ddns_domain_records(ipv4_address=curr_best_node_ip_address)
-                ddns_update_result = ddns_tools.judge_simple_ddns_result(res, curr_best_node_ip_address)
             else:
                 ddns_tools = dnspod_simple_ddns()
-                res = ddns_tools.simple_update_ddns_domain_records(ipv4_address=curr_best_node_ip_address)
-                ddns_update_result = ddns_tools.judge_simple_ddns_result(res, curr_best_node_ip_address)
+            res = ddns_tools.simple_update_ddns_domain_records(ipv4_address=curr_best_node_ip_address)
+            task_dict["response"] = res
+            ddns_update_result = ddns_tools.judge_simple_ddns_result(res, curr_best_node_ip_address)
             if ddns_update_result:
-                mess = my_func_name + ": " + "Update DDNS to a better node succeed!"
-                self.diy_output(mess)
-                task_dict_major_var_dict["message"] += mess + "\n"
                 task_dict_major_var_dict["success"] = True
+                mess = my_func_name + ": " + "Update DDNS to a better node succeed!"
             else:
-                mess = my_func_name + ": " + "DDNS update failed!"
-                self.diy_output(mess)
-                task_dict_major_var_dict["message"] += mess + "\n"
                 task_dict_major_var_dict["success"] = False
+                mess = my_func_name + ": " + "DDNS update failed!"
+            task_dict_major_var_dict["message"] += mess + "\n"
+            self.diy_output(mess)
         
         took_time = time.time() - start_time
         task_dict["task_detail"]["duration_in_sec"] = took_time
