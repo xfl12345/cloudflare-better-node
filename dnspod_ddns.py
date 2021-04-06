@@ -75,12 +75,23 @@ class dnspod_simple_ddns:
         print("Domain \"%s.%s\" DDNS update status:%s" % (aim_records_subdomain, \
                 records_domain, api_response_data.get("status")["message"]) )
         print("DDNS update finished.")
-        return (int(api_response_data.get("status")["code"]) == 1)
+        return api_response_data
         # print("RecordCreate")
         # api = apicn.RecordCreate("test-www", "A", u'默认'.encode("utf8"), '1.1.1.1', 600, domain_id=domain_id, login_token=login_token)
         # record = api().get("record", {})
         # record_id = record.get("id")
         # print("Record id", record_id)
+    def judge_simple_ddns_result(self, request_result, ipv4_address):
+        status_code_in_bool = (int(request_result.get("status")["code"]) == 1)
+        if request_result == None or not status_code_in_bool:
+            return False
+        if str(request_result["record"]["value"]) == str(ipv4_address):
+            return True
+        return False        
 
 if __name__ == '__main__':
-    dnspod_simple_ddns().simple_update_ddns_domain_records(ipv4_address="172.64.100.14")
+    aim_ip_address = "1.1.1.62"
+    ddns_tools = dnspod_simple_ddns()
+    res = ddns_tools.simple_update_ddns_domain_records(ipv4_address=aim_ip_address)
+    print(res)
+    print(ddns_tools.judge_simple_ddns_result(request_result=res, ipv4_address=aim_ip_address))

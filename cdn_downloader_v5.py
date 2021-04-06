@@ -22,7 +22,7 @@ from http import HTTPStatus
 import my_const
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-17 19:55:03"
+__updated__ = "2021-04-06 13:28:28"
 
 # source code URL: https://blog.csdn.net/xufulin2/article/details/113803835
 class download_progress:
@@ -989,10 +989,11 @@ class downloader:
         self.dp_get_new_response(dp=dp)
         if dp.response_context == None:
             dp.keep_run = False
-        tmp_time_val = dp.now_running()
-        dp.dl_chronograph.set_start_time(start=tmp_time_val)
+        end_time_val = None
         while dp.keep_run:
-            if is_not_finished() :
+            tmp_time_val = dp.now_running()
+            dp.dl_chronograph.set_start_time(start=tmp_time_val)
+            while dp.keep_run:
                 try:
                     chunk_data = next(dp.it)
                     chunk_data_len = len(chunk_data)
@@ -1008,7 +1009,8 @@ class downloader:
                 except StopIteration:
                     if dp.it:
                         dp.it.close()
-                    self.diy_output(f"worker:my_thread_id={dp.my_thread_id}," +\
+                    if is_not_finished():
+                        self.diy_output(f"worker:my_thread_id={dp.my_thread_id}," +\
                         "known error=did not finish but could not download.")
                     break
                 except requests.ConnectionError as e:
@@ -1017,24 +1019,21 @@ class downloader:
                 except Exception as e:
                     self.diy_output(f"worker:my_thread_id={dp.my_thread_id},unknow error=",e)
                     break
-            else:
-                dp.dl_chronograph.duration_count_up()
-                dp.dp_chronograph.duration_count_up()
-                clock.pause()
+            clock.pause()
+            end_time_val = dp.dl_chronograph.duration_count_up()
+            dp.dp_chronograph.duration_count_up()
+            f.seek(dp.curr_start)
+            dp.history_done_size += dp.curr_getsize
+            if not is_not_finished():
                 complete_download_count += 1
                 if first_hash_value == None:
                     first_hash_value = self.compute_sha256_hash()
                 elif first_hash_value != self.compute_sha256_hash():
                     complete_download_count -= 1
                     break
-                f.seek(dp.curr_start)
-                dp.history_done_size += dp.curr_getsize
-                dp.curr_getsize = 0
-                clock.go_on()
-                self.dp_get_new_response(dp=dp, status_control=False)
-                dp.now_running()
-                dp.dl_chronograph.set_start_time()
-        end_time_val = dp.dl_chronograph.duration_count_up()
+            dp.curr_getsize = 0
+            clock.go_on()
+            self.dp_get_new_response(dp=dp, status_control=False)
         total_time = dp.dl_chronograph.duration
         clock.stop()
         f.close()
@@ -1058,8 +1057,7 @@ class downloader:
         result_dict["total_workload"] = dp.curr_end - dp.curr_start
         result_dict["my_thread_id"] = dp.my_thread_id
         
-        dp.dp_chronograph.set_duration(duration_val=total_time)
-        dp.dp_chronograph.set_end_time(end=end_time_val)
+        dp.dp_chronograph.end_and_count_up()
         total_size = dp.history_done_size
         if total_time == 0:
             average_speed = self.get_humanize_size(size_in_byte = 0)
@@ -1183,17 +1181,20 @@ if __name__ == "__main__":
     specific_range = None
     # url = "https://www.z4a.net/images/2018/07/09/-9a54c201f9c84c39.jpg"
     # sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
-    url = "https://cf.xiu2.xyz/Github/CloudflareSpeedTest.png"
+    # url = "https://cf.xiu2.xyz/Github/CloudflareSpeedTest.png"
     # sha256_hash_value = "17A88AF83717F68B8BD97873FFCF022C8AED703416FE9B08E0FA9E3287692BF0"
     ###### 128 MiB version
-    specific_range = (0, 128 * my_const.ONE_BIN_MB -1)
-    sha256_hash_value = "254BCC3FC4F27172636DF4BF32DE9F107F620D559B20D760197E452B97453917"
+    # specific_range = (0, 128 * my_const.ONE_BIN_MB -1)
+    # sha256_hash_value = "254BCC3FC4F27172636DF4BF32DE9F107F620D559B20D760197E452B97453917"
     # ###### 60 MiB version
     # specific_range = (0, 60 * my_const.ONE_BIN_MB -1)
     # sha256_hash_value = "CF5AC69CA412F9B3B1A8B8DE27D368C5C05ED4B1B6AA40E6C38D9CBF23711342"
 
-    # url = "https://speed.cloudflare.com/__down?bytes=92"
-    # sha256_hash_value = None
+    url = "https://speed.cloudflare.com/__down?bytes=" + str(33 * my_const.ONE_BIN_MB)
+    ###### 32 MiB version   __down?bytes=x, x>=32.5MiB
+    sha256_hash_value = "34DBA6984A6EF54058F32C1B36CB5F62198B9926E67881A504B0042389D7E9B8"
+    specific_range = (0, 32 * my_const.ONE_BIN_MB -1)
+    
     # url = "http://127.0.0.1/download/text/123.txt"
     # sha256_hash_value = "3DCCBFEE56F49916C3264C6799174AF2FDDDEE75DD98C9E7EA5DF56C6874F0D7"
     down = downloader(
@@ -1202,7 +1203,7 @@ if __name__ == "__main__":
         thread_num=thread_num,
         sha256_hash_value=sha256_hash_value,
         specific_range=specific_range,
-        download_as_file=False,
+        download_as_file=True,
         chunk_size = 512 * my_const.ONE_BIN_KB,
         allow_print = True )
     down.main()

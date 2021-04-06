@@ -25,7 +25,7 @@ import my_const
 
 
 # 最后一次代码修改时间
-__updated__ = "2021-03-18 10:24:05"
+__updated__ = "2021-04-06 13:30:37"
 __version__ = 0.1
 
 class cloudflare_cdn_tool_utils:
@@ -713,6 +713,19 @@ class cloudflare_cdn_speedtest:
         del test_host_list
 
         tmp_carefully_chosen_list = []
+        normal_host_list_len = len(normal_host_list)
+        for i in range(0, normal_host_list_len):
+            ip_address = normal_host_list.pop(0)
+            curr_node_dict:dict = result_normal_host_dict[ip_address]
+            curr_host_avg_speed = float(curr_node_dict["average_speed"])
+            if curr_node_dict["complete_download_count"] >= average_complete_download_count and \
+                    curr_host_avg_speed >= total_average_speed :
+                    curr_node_dict["ip_address"] = ip_address
+                    tmp_carefully_chosen_list.append(curr_node_dict)
+                    del result_normal_host_dict[ip_address]
+                    result_normal_dict["count"] -= 1
+                    task_dict["result"]["carefully_chosen"]["count"] += 1
+        
         def my_compare(a, b):
             if a["complete_download_count"] < b["complete_download_count"]:
                 return True
@@ -726,21 +739,8 @@ class cloudflare_cdn_speedtest:
         merge_sort_obj = MergeSort(
             my_compare=my_compare
         )
-
-        normal_host_list_len = len(normal_host_list)
-        for i in range(0, normal_host_list_len):
-            ip_address = normal_host_list.pop(0)
-            curr_node_dict:dict = result_normal_host_dict[ip_address]
-            curr_host_avg_speed = float(curr_node_dict["average_speed"])
-            if curr_node_dict["complete_download_count"] >= average_complete_download_count and \
-                    curr_host_avg_speed >= total_average_speed :
-                    curr_node_dict["ip_address"] = ip_address
-                    tmp_carefully_chosen_list.append(curr_node_dict)
-                    del result_normal_host_dict[ip_address]
-                    result_normal_dict["count"] -= 1
-                    task_dict["result"]["carefully_chosen"]["count"] += 1
-
         merge_sort_obj.merge_sort(tmp_carefully_chosen_list)
+
         carefully_chosen_hosts_dict = task_dict["result"]["carefully_chosen"]["hosts"]
         while tmp_carefully_chosen_list:
             item:dict = tmp_carefully_chosen_list.pop(0)
@@ -755,37 +755,82 @@ class cloudflare_cdn_speedtest:
 
         return task_dict
 
-    def simple_update_ddns_to_a_better_node(self):
+    def simple_update_ddns_to_a_better_node(self, choose="cf"):
         # task_dict =self.tool_utils.read_json_file("20210310_Wed_173228.json")
         # task_dict = self.just_test_172_64_100_0_p24_network()
-        task_dict = self.just_test_1_1_1_0_p24_network()
-        carefully_chosen_dict = task_dict["result"]["carefully_chosen"]
+        my_func_name = "simple_update_ddns_to_a_better_node"
+        curr_local_time = self.tool_utils.get_curr_local_time()
+        curr_local_time_str = self.tool_utils.get_curr_local_time_str(
+                    curr_local_time=curr_local_time)
+        start_time = time.time()
+        task_dict:dict={
+            "time":curr_local_time_str,
+            "task_detail":{
+                "function": my_func_name,
+                "major_var":{
+                    "message":"",
+                    "success":False
+                },
+                "duration_in_sec":0
+            },
+            "result":{
+            }
+        }
+        task_dict_major_var_dict:dict = task_dict["task_detail"]["major_var"]
+        speedtest_task_dict = self.just_test_1_1_1_0_p24_network()
+        carefully_chosen_dict = speedtest_task_dict["result"]["carefully_chosen"]
         if int(carefully_chosen_dict["count"]) == 0:
-            self.diy_output("simple_update_ddns_to_a_better_node: " +\
-                "All test node are unavailable.Mission failed.")
-            return False
-        carefully_chosen_hosts_dict = carefully_chosen_dict["hosts"]
-        carefully_chosen_hosts_list = list(carefully_chosen_hosts_dict.keys())
-        update_ip_address = carefully_chosen_hosts_list[0]
-        self.diy_output("simple_update_ddns_to_a_better_node: "+\
-                "Update DDNS to "+str(update_ip_address))
-        if self.update_ddns(ipv4_address=carefully_chosen_hosts_list[0]):
-            self.diy_output("simple_update_ddns_to_a_better_node: "+\
-                "Update DDNS to a better node succeed!")
-            return True
-        self.diy_output("simple_update_ddns_to_a_better_node: "+\
-            "DDNS update failed!")
-        return False
-
-
-
-    def update_ddns(self, ipv4_address, choose="cf"):
-        ddns_tools = None
-        if choose == "cf":
-            ddns_tools = cf_simple_ddns()
+            mess = my_func_name + ": " +\
+                "All test node are unavailable.Mission failed."
+            self.diy_output(mess)
+            task_dict_major_var_dict["message"] += mess + "\n"
+            task_dict_major_var_dict["success"] = False
         else:
-            ddns_tools = dnspod_simple_ddns()
-        return ddns_tools.simple_update_ddns_domain_records(ipv4_address=ipv4_address)
+            carefully_chosen_hosts_dict = carefully_chosen_dict["hosts"]
+            carefully_chosen_hosts_list = list(carefully_chosen_hosts_dict.keys())
+            update_ip_address = carefully_chosen_hosts_list[0]
+            mess = my_func_name + ": " + "Update DDNS to "+str(update_ip_address)
+            self.diy_output(mess)
+            task_dict_major_var_dict["message"] += mess + "\n"
+            curr_best_node_ip_address = carefully_chosen_hosts_list[0]
+
+            if choose == "cf":
+                ddns_tools = cf_simple_ddns(specific_ip_address = curr_best_node_ip_address)
+                res = ddns_tools.simple_update_ddns_domain_records(ipv4_address=curr_best_node_ip_address)
+                ddns_update_result = ddns_tools.judge_simple_ddns_result(res, curr_best_node_ip_address)
+            else:
+                ddns_tools = dnspod_simple_ddns()
+                res = ddns_tools.simple_update_ddns_domain_records(ipv4_address=curr_best_node_ip_address)
+                ddns_update_result = ddns_tools.judge_simple_ddns_result(res, curr_best_node_ip_address)
+            if ddns_update_result:
+                mess = my_func_name + ": " + "Update DDNS to a better node succeed!"
+                self.diy_output(mess)
+                task_dict_major_var_dict["message"] += mess + "\n"
+                task_dict_major_var_dict["success"] = True
+            else:
+                mess = my_func_name + ": " + "DDNS update failed!"
+                self.diy_output(mess)
+                task_dict_major_var_dict["message"] += mess + "\n"
+                task_dict_major_var_dict["success"] = False
+        
+        took_time = time.time() - start_time
+        task_dict["task_detail"]["duration_in_sec"] = took_time
+        self.diy_output("Took {} seconds.".format("%.3f"%took_time) )
+
+        self.tool_utils.write_obj_to_json_file(
+            filename=None,
+            curr_local_time=self.tool_utils.get_curr_local_time(),
+            obj=task_dict
+        )
+
+    # def update_ddns(self, ipv4_address, choose="cf"):
+    #     ddns_tools = None
+    #     if choose == "cf":
+    #         ddns_tools = cf_simple_ddns()
+    #     else:
+    #         ddns_tools = dnspod_simple_ddns()
+    #     res = ddns_tools.simple_update_ddns_domain_records(ipv4_address=ipv4_address)
+    #     return ddns_tools.judge_simple_ddns_result(res, ipv4_address=ipv4_address)
 
 
     def main(self):
@@ -805,9 +850,9 @@ if __name__ == "__main__":
     # sha256_hash_value = "6182BB277CE268F10BCA7DB3A16B9475F75B7D861907C7EFB188A01420C5B780"
     # specific_range = None
 
-    url = "https://www.z4a.net/images/2017/07/20/myles-tan-91630.jpg"
-    sha256_hash_value = "A58CB1B0ACF8435F0BD06FB04093875D75F15857DFC72F691498184DBA29BBED"
-    specific_range = None
+    # url = "https://www.z4a.net/images/2017/07/20/myles-tan-91630.jpg"
+    # sha256_hash_value = "A58CB1B0ACF8435F0BD06FB04093875D75F15857DFC72F691498184DBA29BBED"
+    # specific_range = None
 
     # url = "https://cf.xiu2.xyz/Github/CloudflareSpeedTest.png"
     # sha256_hash_value = "17A88AF83717F68B8BD97873FFCF022C8AED703416FE9B08E0FA9E3287692BF0"
@@ -819,6 +864,11 @@ if __name__ == "__main__":
     # ###### 60 MiB version
     # specific_range = (0, 60 * my_const.ONE_BIN_MB -1)
     # sha256_hash_value = "CF5AC69CA412F9B3B1A8B8DE27D368C5C05ED4B1B6AA40E6C38D9CBF23711342"
+
+    url = "https://speed.cloudflare.com/__down?bytes=" + str(33 * my_const.ONE_BIN_MB -1)
+    ###### 32 MiB version   __down?bytes=x, x>=32.5MiB
+    sha256_hash_value = "34DBA6984A6EF54058F32C1B36CB5F62198B9926E67881A504B0042389D7E9B8"
+    specific_range = (0, 32 * my_const.ONE_BIN_MB -1)
 
     test = cloudflare_cdn_speedtest(
         url=url,

@@ -7,6 +7,7 @@ import my_const
 import json_tools
 from forced_ip_https_adapter import ForcedIPHTTPSAdapter
 
+import conf.cloudflare_cdn_ddns_conf as cf_conf
 
 """
 A normal Cloudflare API requests:
@@ -34,15 +35,13 @@ Just slide down the page, you may find the "Zone ID" on the right.
 
 """
 
-import conf.cloudflare_cdn_ddns_conf as cf_conf
-
 class cf_simple_ddns:
-    def __init__(self) -> None:
+    def __init__(self, specific_ip_address:str="1.0.0.0") -> None:
         self.user_agent = my_const.USER_AGENT
 
         # user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.150 Safari/537.36 Edg/88.0.705.63"
 
-        self.specific_ip_address = "1.1.1.0"
+        self.specific_ip_address = specific_ip_address
         self.cf_zones_url = "https://api.cloudflare.com/client/v4/zones"
         self.cf_zones_dns_records_url = self.cf_zones_url + "/" + cf_conf.zone_id + "/dns_records"
         self.second_level_domain = None
@@ -175,17 +174,21 @@ class cf_simple_ddns:
         res = self.forced_ip_request(url=url, headers=headers, method="put", payload=payload).text
         request_result = self.try_text2json(json_str=res)
         # print(request_result)
+        return request_result
+        
+    def judge_simple_ddns_result(self, request_result, ipv4_address):
         if request_result == None or not bool(request_result["success"]):
             return False
         if str(request_result["result"]["content"]) == str(ipv4_address):
             return True
-        return False
-
+        return False        
 
 if __name__ == "__main__":
     test = cf_simple_ddns()
     print(test.ddns_domain_id)
-    print(test.simple_update_ddns_domain_records(ipv4_address="172.64.100.14"))
+    res = test.simple_update_ddns_domain_records(ipv4_address="1.1.1.172")
+    print(res)
+    print( test.judge_simple_ddns_result(request_result=res, ipv4_address="1.1.1.172") )
 
 
 
