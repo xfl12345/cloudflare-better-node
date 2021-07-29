@@ -21,12 +21,10 @@ from dnspod_ddns import dnspod_simple_ddns
 import pings
 import my_const
 
-
-
-
 # 最后一次代码修改时间
 __updated__ = "2021-04-06 15:01:05"
 __version__ = 0.1
+
 
 class cloudflare_cdn_tool_utils:
     ipv4_list_url = "https://www.cloudflare.com/ips-v4"
@@ -37,41 +35,40 @@ class cloudflare_cdn_tool_utils:
     simple_get_best_network_latest_result_filename = "latest_result.json"
     simple_get_best_network_latest_blackwhitelist_filename = "latest_blackwhitelist.json"
 
-
-    def __init__(self, 
-            allow_print:bool=False, 
-            prefer_use_local_blackwhitelist:bool=True):
-        self.allow_print:bool = allow_print
-        self.prefer_use_local_blackwhitelist:bool=prefer_use_local_blackwhitelist
+    def __init__(self,
+                 allow_print: bool = False,
+                 prefer_use_local_blackwhitelist: bool = True):
+        self.allow_print: bool = allow_print
+        self.prefer_use_local_blackwhitelist: bool = prefer_use_local_blackwhitelist
 
     # def clear_result(self):
     #     pass
-    
-    def diy_output(self,*objects, sep=' ', end='\n', file=sys.stdout, flush=False):
+
+    def diy_output(self, *objects, sep=' ', end='\n', file=sys.stdout, flush=False):
         if self.allow_print:
             print(*objects, sep=sep, end=end, file=file, flush=flush)
 
-    def read_json_file(self, filename:str ):
+    def read_json_file(self, filename: str):
         full_path_to_file = self.file_root + filename
         obj = None
 
         if not os.path.exists(self.file_root) or \
-            not os.path.exists(full_path_to_file):
+                not os.path.exists(full_path_to_file):
             return obj
-        
-        with open(full_path_to_file, "r", encoding='utf-8') as f:
+
+        with open(full_path_to_file, "r", encoding="utf-8") as f:
             obj = json.loads(f.read())
         return obj
 
-    def write_to_file(self, 
-            filename=None, 
-            curr_local_time=None, 
-            content=None, 
-            suffix:str=None):
-        
+    def write_to_file(self,
+                      filename=None,
+                      curr_local_time=None,
+                      content=None,
+                      suffix: str = None):
+
         if not os.path.exists(self.file_root):
             os.makedirs(self.file_root)
-        
+
         if filename == None:
             if curr_local_time == None:
                 curr_local_time = self.get_curr_local_time()
@@ -80,20 +77,20 @@ class cloudflare_cdn_tool_utils:
             filename = filename + "." + suffix
         filepath = self.file_root + filename
         f = open(file=filepath,
-                mode="w",
-                encoding="UTF-8")
+                 mode="w",
+                 encoding="UTF-8")
         f.write(content)
         f.close()
 
     def write_obj_to_json_file(self,
-            filename=None, 
-            curr_local_time=None, 
-            obj=None):
-        
+                               filename=None,
+                               curr_local_time=None,
+                               obj=None):
+
         content = json.dumps(
-            obj=obj, 
-            ensure_ascii=False, 
-            indent=2 )
+            obj=obj,
+            ensure_ascii=False,
+            indent=2)
 
         suffix = None
         if filename != None:
@@ -105,12 +102,12 @@ class cloudflare_cdn_tool_utils:
         self.write_to_file(
             filename=filename,
             curr_local_time=curr_local_time,
-            content=content, 
+            content=content,
             suffix=suffix
         )
 
-    def get_ipv4_netwrok_list(self, 
-            specific_ip_address:str="1.1.1.100" ):
+    def get_ipv4_netwrok_list(self,
+                              specific_ip_address: str = "1.1.1.100"):
         pattern = re.compile(self.PATTERN_GET_IPV4_NETWORK_ADDRESS)
         if self.prefer_use_local_blackwhitelist:
             obj = self.read_json_file(
@@ -118,7 +115,7 @@ class cloudflare_cdn_tool_utils:
             )
             netwrok_list = []
             if obj != None and isinstance(obj, list) and len(obj) == 2 and \
-                    isinstance(obj[1], list) :
+                    isinstance(obj[1], list):
                 for item in obj[1]:
                     if isinstance(item, str):
                         ip_addr_iter = pattern.finditer(item)
@@ -127,10 +124,10 @@ class cloudflare_cdn_tool_utils:
                 return netwrok_list
 
         down = downloader(
-            url=self.ipv4_list_url, 
+            url=self.ipv4_list_url,
             download_as_file=False,
             specific_ip_address=specific_ip_address,
-            stream = False,
+            stream=False,
             allow_print=self.allow_print
         )
         r = down.just_get_response()
@@ -140,15 +137,16 @@ class cloudflare_cdn_tool_utils:
         cf_network_address_iter = pattern.finditer(r.text)
         r.close()
         return [i.group(0) for i in cf_network_address_iter]
-  
-    def get_ipv4_netwrok_nearby_endprefix(self, 
-            prefix:int, 
-            deep_level:int=my_const.SCAN_NORMAL)->int:
+
+    def get_ipv4_netwrok_nearby_endprefix(self,
+                                          prefix: int,
+                                          deep_level: int = my_const.SCAN_NORMAL) -> int:
         def normal_or_default():
-            a = (int(prefix / 4) + 1) *4
+            a = (int(prefix / 4) + 1) * 4
             if a > 32:
                 return 32
             return a
+
         if deep_level == my_const.SCAN_NORMAL:
             return normal_or_default()
         elif deep_level == my_const.SCAN_MORE_DEEPER:
@@ -163,7 +161,7 @@ class cloudflare_cdn_tool_utils:
         else:
             return normal_or_default()
 
-    def dict_mover(self, src:dict, dest:dict):
+    def dict_mover(self, src: dict, dest: dict):
         # while True:
         #     try:
         #         k,v = src.popitem()
@@ -173,70 +171,70 @@ class cloudflare_cdn_tool_utils:
         dest.update(src)
         src.clear()
 
-    def get_curr_local_time_str(self, curr_local_time:time.struct_time):
+    def get_curr_local_time_str(self, curr_local_time: time.struct_time):
         return time.strftime("TZ(%z)_Y(%Y)-M(%m)-D(%d)_%A_%H:%M:%S", curr_local_time)
 
-    def get_curr_local_time(self)->time.struct_time:
+    def get_curr_local_time(self) -> time.struct_time:
         return time.localtime()
 
-    def ping_scan_ipv4_subnetwork(self, 
-            network_obj:ipaddress.IPv4Network, 
-            end_prefixlen=None, 
-            ping_times:int=16,
-            wirte_to_file:bool=False, 
-            violence_mode:bool=False):
+    def ping_scan_ipv4_subnetwork(self,
+                                  network_obj: ipaddress.IPv4Network,
+                                  end_prefixlen=None,
+                                  ping_times: int = 16,
+                                  wirte_to_file: bool = False,
+                                  violence_mode: bool = False):
         if end_prefixlen == None:
             end_prefixlen = self.get_ipv4_netwrok_nearby_endprefix(network_obj.prefixlen)
         else:
             end_prefixlen = int(end_prefixlen)
         if end_prefixlen < network_obj.prefixlen:
-            raise ValueError(f"end_prefixlen={end_prefixlen}(24 in default) should not " +\
-                f"smaller than network_obj's prefixlen={network_obj.prefixlen}.")
-        sub_network_iter = network_obj.subnets( end_prefixlen - network_obj.prefixlen)
+            raise ValueError(f"end_prefixlen={end_prefixlen}(24 in default) should not " + \
+                             f"smaller than network_obj's prefixlen={network_obj.prefixlen}.")
+        sub_network_iter = network_obj.subnets(end_prefixlen - network_obj.prefixlen)
         self.diy_output("ping_scan_ipv4_subnetwork:Starting ping...")
         start_time = time.time()
 
         curr_local_time = self.get_curr_local_time()
         curr_local_time_str = self.get_curr_local_time_str(curr_local_time=curr_local_time)
-        ping_task_dict:dict = {
-            "time":curr_local_time_str,
-            "task_detail":{
-                "function":"ping_scan_ipv4_subnetwork",
-                "major_var":{
-                    "network_address":network_obj.with_prefixlen,
-                    "end_prefixlen":end_prefixlen,
-                    "ping_times":ping_times
+        ping_task_dict: dict = {
+            "time": curr_local_time_str,
+            "task_detail": {
+                "function": "ping_scan_ipv4_subnetwork",
+                "major_var": {
+                    "network_address": network_obj.with_prefixlen,
+                    "end_prefixlen": end_prefixlen,
+                    "ping_times": ping_times
                 },
-                "duration_in_sec":0
+                "duration_in_sec": 0
             },
-            "result":{
-                "count":0,
-                "reachable":{
-                    "count":0, 
-                    "lowest_loss_host":{
-                        "count":0, 
-                        "hosts":{}
+            "result": {
+                "count": 0,
+                "reachable": {
+                    "count": 0,
+                    "lowest_loss_host": {
+                        "count": 0,
+                        "hosts": {}
                     },
-                    "normal_host":{
-                        "count":0, 
-                        "hosts":{}
+                    "normal_host": {
+                        "count": 0,
+                        "hosts": {}
                     },
                 },
-                "unreachable":{
-                    "count":0, 
-                    "hosts":{}
+                "unreachable": {
+                    "count": 0,
+                    "hosts": {}
                 }
             }
         }
-        ping_result_dict:dict = ping_task_dict["result"]
-        reachable_dict:dict = ping_result_dict["reachable"]
-        lowest_loss_host_dict:dict = reachable_dict["lowest_loss_host"]
-        normal_host_dict:dict = reachable_dict["normal_host"]
-        unreachable_dict:dict = ping_result_dict["unreachable"]
-  
-        ip_addr:str
-        r:pings.ping.Response
-        low_dict_last_key:str
+        ping_result_dict: dict = ping_task_dict["result"]
+        reachable_dict: dict = ping_result_dict["reachable"]
+        lowest_loss_host_dict: dict = reachable_dict["lowest_loss_host"]
+        normal_host_dict: dict = reachable_dict["normal_host"]
+        unreachable_dict: dict = ping_result_dict["unreachable"]
+
+        ip_addr: str
+        r: pings.ping.Response
+        low_dict_last_key: str
         lowest_loss_host_dict["count"] = 0
         p_result_list = []
         p_result_list_len = 0
@@ -246,20 +244,20 @@ class cloudflare_cdn_tool_utils:
                 ip_address = str(item.network_address)
                 sender, receiver = mp.Pipe(duplex=True)
                 p = mp.Process(
-                    target=simple_mpc_ping, 
+                    target=simple_mpc_ping,
                     args=(
-                        sender,         #mp_pipe_sender
-                        ip_address,     #ip_address
-                        32,             #packet_data_size
-                        400,            #timeout
-                        0,              #max_wait
-                        ping_times      #times
+                        sender,  # mp_pipe_sender
+                        ip_address,  # ip_address
+                        32,  # packet_data_size
+                        400,  # timeout
+                        0,  # max_wait
+                        ping_times  # times
                     )
                 )
                 p_result_list.append(
                     {
-                        "p":p,
-                        "receiver":receiver
+                        "p": p,
+                        "receiver": receiver
                     }
                 )
                 p_result_list_len += 1
@@ -274,46 +272,46 @@ class cloudflare_cdn_tool_utils:
             else:
                 max_task_num = 4
             # p_pool = ccfutures.ProcessPoolExecutor( max_workers=max_task_num )
-            p_pool = ccfutures.ThreadPoolExecutor( max_workers=max_task_num )
+            p_pool = ccfutures.ThreadPoolExecutor(max_workers=max_task_num)
             for item in sub_network_iter:
                 ip_address = str(item.network_address)
                 sender, receiver = mp.Pipe(duplex=True)
                 p = p_pool.submit(
                     simple_ping,
-                    ip_address=ip_address,  #ip_address
-                    packet_data_size=32,    #packet_data_size
-                    timeout=400,            #timeout
-                    max_wait=0,             #max_wait
-                    times=ping_times        #times
+                    ip_address=ip_address,  # ip_address
+                    packet_data_size=32,  # packet_data_size
+                    timeout=400,  # timeout
+                    max_wait=0,  # max_wait
+                    times=ping_times  # times
                 )
                 p_result_list.append(p)
                 p_result_list_len += 1
             # p_asyncresult:mp.pool.AsyncResult
             # for p_asyncresult in p_asyncresult_list:
             #     p_asyncresult.wait()
-        
+
         # 处理ping结果
         while p_result_list:
             if violence_mode:
-                p_dict:dict = p_result_list.pop(0)
-                p:mp.Process = p_dict["p"]
+                p_dict: dict = p_result_list.pop(0)
+                p: mp.Process = p_dict["p"]
                 if p.is_alive():
                     p_result_list.append(p_dict)
                     continue
-                item_mpc:mpc.Connection = p_dict["receiver"]
-                res = dict( item_mpc.recv() )
+                item_mpc: mpc.Connection = p_dict["receiver"]
+                res = dict(item_mpc.recv())
             else:
-                item_ccfut:ccfutures.Future = p_result_list.pop(0)
-                res = dict( item_ccfut.result() )
-            ip_addr,r = res.popitem()
+                item_ccfut: ccfutures.Future = p_result_list.pop(0)
+                res = dict(item_ccfut.result())
+            ip_addr, r = res.popitem()
             ping_result_dict["count"] += 1
             # 如果主机可达
             if r.packet_received != 0:
                 reachable_dict["count"] += 1
                 # 如果 低丢包字典 不为空
-                if lowest_loss_host_dict["count"] > 0: 
+                if lowest_loss_host_dict["count"] > 0:
                     # 取出最后一次压入字典的值 并 强制类型为dict
-                    d:dict = lowest_loss_host_dict["hosts"][low_dict_last_key]
+                    d: dict = lowest_loss_host_dict["hosts"][low_dict_last_key]
                     # 取出字典里的 packet_loss 的值
                     dict_packet_loss = int(d["packet_loss"])
                     if dict_packet_loss >= int(r.packet_loss):
@@ -332,21 +330,21 @@ class cloudflare_cdn_tool_utils:
                     else:
                         normal_host_dict["hosts"][ip_addr] = r.to_dict()
                         normal_host_dict["count"] += 1
-                else: # lowest_loss_host_dict is empty
+                else:  # lowest_loss_host_dict is empty
                     lowest_loss_host_dict["hosts"][ip_addr] = r.to_dict()
                     low_dict_last_key = ip_addr
                     lowest_loss_host_dict["count"] += 1
             else:
                 unreachable_dict["hosts"][ip_addr] = r.to_dict()
                 unreachable_dict["count"] += 1
-            del ip_addr,r
+            del ip_addr, r
         # for item in mp_receiver_list:
         #     res = dict(item.recv())
         #     ping_result_dict.update(res)
         took_time = time.time() - start_time
         ping_task_dict["task_detail"]["duration_in_sec"] = took_time
-        self.diy_output("Took {} seconds.".format("%.3f"%took_time) )
-        
+        self.diy_output("Took {} seconds.".format("%.3f" % took_time))
+
         if wirte_to_file:
             self.write_obj_to_json_file(
                 curr_local_time=curr_local_time,
@@ -358,27 +356,27 @@ class cloudflare_cdn_tool_utils:
 
         return ping_task_dict
 
-    def simple_get_best_network(self, 
-            wirte_to_file:bool=True, 
-            get_blackwhitelist:bool=True,
-            network_list:list=None):
+    def simple_get_best_network(self,
+                                wirte_to_file: bool = True,
+                                get_blackwhitelist: bool = True,
+                                network_list: list = None):
         while network_list == None:
             network_list = self.get_ipv4_netwrok_list()
         start_time = time.time()
         curr_local_time = self.get_curr_local_time()
         curr_local_time_str = self.get_curr_local_time_str(curr_local_time=curr_local_time)
-        ping_task_dict:dict={
-            "time":curr_local_time_str,
-            "task_detail":{
-                "function":"simple_get_best_network_list",
-                "major_var":{"get_blackwhitelist":get_blackwhitelist},
-                "duration_in_sec":0
+        ping_task_dict: dict = {
+            "time": curr_local_time_str,
+            "task_detail": {
+                "function": "simple_get_best_network_list",
+                "major_var": {"get_blackwhitelist": get_blackwhitelist},
+                "duration_in_sec": 0
             },
-            "result":{
-                "count":0,
-                "carefully_chosen":{
-                    "count":0, 
-                    "supernet":{
+            "result": {
+                "count": 0,
+                "carefully_chosen": {
+                    "count": 0,
+                    "supernet": {
                         # "network_address":{   #This is fake code
                         #     "scan_deep":0     # the end_prefixlen
                         #     "count":0,
@@ -386,27 +384,27 @@ class cloudflare_cdn_tool_utils:
                         # },
                     }
                 },
-                "unreachable":{
-                    "count":0,
-                    "supernet":{}
+                "unreachable": {
+                    "count": 0,
+                    "supernet": {}
                 }
             }
         }
-        
-        ping_result_dict:dict = ping_task_dict["result"]
-        carefully_chosen_dict:dict = ping_result_dict["carefully_chosen"]
-        unreachable_dict:dict = ping_result_dict["unreachable"]
-        tmp_ping_result:dict
-        curr_network_dict:dict
-        copy_dict:dict
+
+        ping_result_dict: dict = ping_task_dict["result"]
+        carefully_chosen_dict: dict = ping_result_dict["carefully_chosen"]
+        unreachable_dict: dict = ping_result_dict["unreachable"]
+        tmp_ping_result: dict
+        curr_network_dict: dict
+        copy_dict: dict
 
         for network_address in network_list:
             network_obj = ipaddress.IPv4Network(network_address)
             tmp_ping_result = self.ping_scan_ipv4_subnetwork(
-                network_obj=network_obj, 
-                ping_times=8, 
+                network_obj=network_obj,
+                ping_times=8,
                 wirte_to_file=False)
-            
+
             is_complete_unreachable = True
             if tmp_ping_result["result"]["reachable"]["count"] != 0:
                 is_complete_unreachable = False
@@ -419,7 +417,7 @@ class cloudflare_cdn_tool_utils:
                 # 把旗下最优的子网网络ping结果全部照搬
                 copy_dict = tmp_ping_result["result"]["reachable"]["lowest_loss_host"]
                 curr_network_dict["count"] = copy_dict["count"]
-                curr_network_dict["subnetwork_address"]={}
+                curr_network_dict["subnetwork_address"] = {}
                 self.dict_mover(
                     src=copy_dict["hosts"],
                     dest=curr_network_dict["subnetwork_address"]
@@ -427,7 +425,7 @@ class cloudflare_cdn_tool_utils:
                 # 纳入总数
                 carefully_chosen_dict["count"] += copy_dict["count"]
                 ping_result_dict["count"] += copy_dict["count"]
-            
+
             # 同样办法处理不可达的网络，此处记录这些信息方便日后统计分析
             unreachable_dict["supernet"][network_address] = {}
             curr_network_dict = unreachable_dict["supernet"][network_address]
@@ -435,7 +433,7 @@ class cloudflare_cdn_tool_utils:
             curr_network_dict["scan_deep"] = tmp_ping_result["task_detail"]["major_var"]["end_prefixlen"]
             copy_dict = tmp_ping_result["result"]["unreachable"]
             curr_network_dict["count"] = copy_dict["count"]
-            curr_network_dict["subnetwork_address"]={}
+            curr_network_dict["subnetwork_address"] = {}
             self.dict_mover(
                 src=copy_dict["hosts"],
                 dest=curr_network_dict["subnetwork_address"]
@@ -445,13 +443,13 @@ class cloudflare_cdn_tool_utils:
 
         took_time = time.time() - start_time
         ping_task_dict["task_detail"]["duration_in_sec"] = took_time
-        self.diy_output("Took {} seconds.".format("%.3f"%took_time) )
+        self.diy_output("Took {} seconds.".format("%.3f" % took_time))
 
         if wirte_to_file:
             content = json.dumps(
-                obj=ping_task_dict, 
-                ensure_ascii=False, 
-                indent=2 )
+                obj=ping_task_dict,
+                ensure_ascii=False,
+                indent=2)
             self.write_to_file(
                 filename=None,
                 curr_local_time=curr_local_time,
@@ -460,38 +458,38 @@ class cloudflare_cdn_tool_utils:
             self.write_to_file(
                 filename=self.simple_get_best_network_latest_result_filename,
                 content=content)
-        
+
         time.sleep(1)
 
         if get_blackwhitelist:
             blacklist = []
             whitelist = []
             blackwhitelist = [blacklist, whitelist]
-            supernet_dict:dict = unreachable_dict["supernet"]
-            subnet_addr_dict:dict
+            supernet_dict: dict = unreachable_dict["supernet"]
+            subnet_addr_dict: dict
             for supernet in supernet_dict.keys():
                 if bool(supernet_dict[supernet]["is_complete_unreachable"]):
                     blacklist.append(supernet)
                 else:
-                    subnet_addr_dict:dict = supernet_dict[supernet]["subnetwork_address"]
+                    subnet_addr_dict: dict = supernet_dict[supernet]["subnetwork_address"]
                     for subnetwork_address in subnet_addr_dict.keys():
                         network_address_with_prefix = subnetwork_address + \
-                                        "/" + str(supernet_dict[supernet]["scan_deep"])
+                                                      "/" + str(supernet_dict[supernet]["scan_deep"])
                         blacklist.append(network_address_with_prefix)
-            
+
             supernet_dict = carefully_chosen_dict["supernet"]
             for supernet in supernet_dict.keys():
                 subnet_addr_dict = supernet_dict[supernet]["subnetwork_address"]
                 for subnetwork_address in subnet_addr_dict.keys():
                     network_address_with_prefix = subnetwork_address + \
-                                    "/" + str(supernet_dict[supernet]["scan_deep"])
+                                                  "/" + str(supernet_dict[supernet]["scan_deep"])
                     whitelist.append(network_address_with_prefix)
-            
+
             if wirte_to_file:
                 content = json.dumps(
-                    obj=blackwhitelist, 
-                    ensure_ascii=False, 
-                    indent=2 )
+                    obj=blackwhitelist,
+                    ensure_ascii=False,
+                    indent=2)
                 self.write_to_file(
                     curr_local_time=curr_local_time,
                     content=content,
@@ -503,10 +501,10 @@ class cloudflare_cdn_tool_utils:
 
         return ping_task_dict
 
-    def iteration_get_best_network(self, 
-            wirte_to_file:bool=True, 
-            get_blackwhitelist:bool=True, 
-            iterate_times:int=1):
+    def iteration_get_best_network(self,
+                                   wirte_to_file: bool = True,
+                                   get_blackwhitelist: bool = True,
+                                   iterate_times: int = 1):
         res = None
         for i in range(iterate_times):
             res = self.simple_get_best_network(
@@ -515,22 +513,24 @@ class cloudflare_cdn_tool_utils:
             )
         return res
 
+
 class cloudflare_cdn_speedtest:
     """
     specific_range 要求传入的是一个长度为 2 的Tuple元组，包含(start_from, end_at)两个参数
     和 downloader 的 specific_range 参数相同
     """
-    def __init__(self, 
-            url:str, 
-            download_as_file:bool=False,
-            timeout_to_stop=20,  # float in second 
-            allow_print:bool=False,
-            sha256_hash_value:str=None,
-            specific_range:tuple=my_const.SPEEDTEST_DEFAULT_RANGE ):
-        self.url:str = url
-        self.download_as_file:bool = download_as_file
+
+    def __init__(self,
+                 url: str,
+                 download_as_file: bool = False,
+                 timeout_to_stop=20,  # float in second
+                 allow_print: bool = False,
+                 sha256_hash_value: str = None,
+                 specific_range: tuple = my_const.SPEEDTEST_DEFAULT_RANGE):
+        self.url: str = url
+        self.download_as_file: bool = download_as_file
         self.timeout_to_stop = timeout_to_stop
-        self.allow_print:bool = allow_print
+        self.allow_print: bool = allow_print
         self.sha256_hash_value = None
         if (sha256_hash_value != None):
             self.sha256_hash_value = sha256_hash_value.upper()
@@ -550,39 +550,39 @@ class cloudflare_cdn_speedtest:
             specific_range=self.specific_range
         )
 
-    def just_speedtest(self, specific_ip_address:str, down:downloader=None):
+    def just_speedtest(self, specific_ip_address: str, down: downloader = None):
         result_dict = {}
         if down == None:
             down = self.get_download_obj()
         down.specific_ip_address = specific_ip_address
         if not down.speedtest_single_thread(
-                    result_dict=result_dict, 
-                    timeout_to_stop=self.timeout_to_stop):
+                result_dict=result_dict,
+                timeout_to_stop=self.timeout_to_stop):
             res_dict = {
-                "downloaded_size":0,
-                "downloaded_size_h":"0Byte",
-                "complete_download_count":0,
-                "duration":0,
-                "average_speed":0,
-                "average_speed_h":"0Byte/s"
+                "downloaded_size": 0,
+                "downloaded_size_h": "0Byte",
+                "complete_download_count": 0,
+                "duration": 0,
+                "average_speed": 0,
+                "average_speed_h": "0Byte/s"
             }
             return res_dict
-        
-        complete_download_count:int = result_dict["complete_download_count"]
+
+        complete_download_count: int = result_dict["complete_download_count"]
         total_size = result_dict["history_done_size"]
         total_time = result_dict["duration"]
         if total_time == 0:
             total_time = self.timeout_to_stop
         average_speed = total_size / total_time
         average_speed_humanize = \
-            down.get_humanize_size(size_in_byte = average_speed ) + "/s"
+            down.get_humanize_size(size_in_byte=average_speed) + "/s"
         res_dict = {
-            "downloaded_size":total_size,
-            "downloaded_size_h":down.get_humanize_size(total_size),
-            "complete_download_count":complete_download_count,
-            "duration":total_time,
-            "average_speed":average_speed,
-            "average_speed_h":average_speed_humanize
+            "downloaded_size": total_size,
+            "downloaded_size_h": down.get_humanize_size(total_size),
+            "complete_download_count": complete_download_count,
+            "duration": total_time,
+            "average_speed": average_speed,
+            "average_speed_h": average_speed_humanize
         }
         return res_dict
 
@@ -604,37 +604,37 @@ class cloudflare_cdn_speedtest:
     # def just_test_1_1_1_0_p24_network(self):
     #     return self.just_test_network("1.1.1.0/24")
 
-    def just_test_network(self,ipv4_network_str:str):
+    def just_test_network(self, ipv4_network_str: str):
         ipv4_network_obj = ipaddress.IPv4Network(ipv4_network_str)
         # sub_network_iter = ipv4_network_obj.subnets(new_prefix=32)
         # a_list = [ str(item.network_address) for item in sub_network_iter ]
         # print(a_list)
         curr_local_time = self.tool_utils.get_curr_local_time()
         curr_local_time_str = self.tool_utils.get_curr_local_time_str(
-                    curr_local_time=curr_local_time)
+            curr_local_time=curr_local_time)
         start_time = time.time()
-        task_dict:dict={
-            "time":curr_local_time_str,
-            "task_detail":{
-                "function":"just_test_network",
-                "major_var":{
-                    "ipv4_network_str":ipv4_network_str,
-                    "test_hosts_count":0,
+        task_dict: dict = {
+            "time": curr_local_time_str,
+            "task_detail": {
+                "function": "just_test_network",
+                "major_var": {
+                    "ipv4_network_str": ipv4_network_str,
+                    "test_hosts_count": 0,
                 },
-                "duration_in_sec":0
+                "duration_in_sec": 0
             },
-            "result":{
-                "carefully_chosen":{
-                    "count":0,
-                    "hosts":collections.OrderedDict()
+            "result": {
+                "carefully_chosen": {
+                    "count": 0,
+                    "hosts": collections.OrderedDict()
                 },
-                "normal":{
-                    "count":0,
-                    "hosts":{}
+                "normal": {
+                    "count": 0,
+                    "hosts": {}
                 },
-                "unavailable":{
-                    "count":0,
-                    "hosts":[]
+                "unavailable": {
+                    "count": 0,
+                    "hosts": []
                 }
             }
         }
@@ -648,7 +648,7 @@ class cloudflare_cdn_speedtest:
         unreachable_hosts = list((ping_task_dict["result"]["unreachable"]["hosts"]).keys())
         task_dict["result"]["unavailable"]["hosts"] += unreachable_hosts
         task_dict["result"]["unavailable"]["count"] += len(unreachable_hosts)
-        hosts_dict:dict = ping_task_dict["result"]["reachable"]["lowest_loss_host"]["hosts"]
+        hosts_dict: dict = ping_task_dict["result"]["reachable"]["lowest_loss_host"]["hosts"]
         hosts_iter = hosts_dict.keys()
         test_host_list = list(hosts_iter)
         normal_host_list = []
@@ -661,8 +661,8 @@ class cloudflare_cdn_speedtest:
             )
             return task_dict
 
-        down:downloader = self.get_download_obj()
-        if self.sha256_hash_value == None and not down.main() :
+        down: downloader = self.get_download_obj()
+        if self.sha256_hash_value == None and not down.main():
             return False
         self.sha256_hash_value = down.sha256_hash_value
         down.specific_ip_address = test_host_list[0]
@@ -677,7 +677,7 @@ class cloudflare_cdn_speedtest:
         total_complete_download_count = 0
         for ip_address in test_host_list:
             tmp_speedtest_result = self.just_speedtest(
-                specific_ip_address=ip_address, 
+                specific_ip_address=ip_address,
                 down=down
             )
             if int(tmp_speedtest_result["downloaded_size"]) == 0:
@@ -693,7 +693,7 @@ class cloudflare_cdn_speedtest:
 
         took_time = time.time() - start_time
         task_dict["task_detail"]["duration_in_sec"] = took_time
-        self.diy_output("Took {} seconds.".format("%.3f"%took_time) )
+        self.diy_output("Took {} seconds.".format("%.3f" % took_time))
 
         test_host_list_len = len(test_host_list)
         if test_host_list_len != 0 and result_unavailable_dict["count"] != test_host_list_len:
@@ -716,16 +716,16 @@ class cloudflare_cdn_speedtest:
         normal_host_list_len = len(normal_host_list)
         for i in range(0, normal_host_list_len):
             ip_address = normal_host_list.pop(0)
-            curr_node_dict:dict = result_normal_host_dict[ip_address]
+            curr_node_dict: dict = result_normal_host_dict[ip_address]
             curr_host_avg_speed = float(curr_node_dict["average_speed"])
             if curr_node_dict["complete_download_count"] >= average_complete_download_count and \
-                    curr_host_avg_speed >= total_average_speed :
-                    curr_node_dict["ip_address"] = ip_address
-                    tmp_carefully_chosen_list.append(curr_node_dict)
-                    del result_normal_host_dict[ip_address]
-                    result_normal_dict["count"] -= 1
-                    task_dict["result"]["carefully_chosen"]["count"] += 1
-        
+                    curr_host_avg_speed >= total_average_speed:
+                curr_node_dict["ip_address"] = ip_address
+                tmp_carefully_chosen_list.append(curr_node_dict)
+                del result_normal_host_dict[ip_address]
+                result_normal_dict["count"] -= 1
+                task_dict["result"]["carefully_chosen"]["count"] += 1
+
         def my_compare(a, b):
             if a["complete_download_count"] < b["complete_download_count"]:
                 return True
@@ -736,6 +736,7 @@ class cloudflare_cdn_speedtest:
                     if a["duration"] > b["duration"]:
                         return True
             return False
+
         merge_sort_obj = MergeSort(
             my_compare=my_compare
         )
@@ -743,10 +744,10 @@ class cloudflare_cdn_speedtest:
 
         carefully_chosen_hosts_dict = task_dict["result"]["carefully_chosen"]["hosts"]
         while tmp_carefully_chosen_list:
-            item:dict = tmp_carefully_chosen_list.pop(0)
+            item: dict = tmp_carefully_chosen_list.pop(0)
             ip_address = item.pop("ip_address")
             carefully_chosen_hosts_dict[ip_address] = item
-        
+
         self.tool_utils.write_obj_to_json_file(
             filename=None,
             curr_local_time=self.tool_utils.get_curr_local_time(),
@@ -759,30 +760,30 @@ class cloudflare_cdn_speedtest:
         my_func_name = "simple_update_ddns_to_a_better_node"
         curr_local_time = self.tool_utils.get_curr_local_time()
         curr_local_time_str = self.tool_utils.get_curr_local_time_str(
-                    curr_local_time=curr_local_time)
+            curr_local_time=curr_local_time)
         start_time = time.time()
-        task_dict:dict={
-            "time":curr_local_time_str,
-            "task_detail":{
+        task_dict: dict = {
+            "time": curr_local_time_str,
+            "task_detail": {
                 "function": my_func_name,
-                "major_var":{
-                    "update_ip_address":"",
-                    "message":"",
-                    "success":False
+                "major_var": {
+                    "update_ip_address": "",
+                    "message": "",
+                    "success": False
                 },
-                "duration_in_sec":0
+                "duration_in_sec": 0
             },
-            "response":{
+            "response": {
             }
         }
-        task_dict_major_var_dict:dict = task_dict["task_detail"]["major_var"]
+        task_dict_major_var_dict: dict = task_dict["task_detail"]["major_var"]
         speedtest_task_dict = self.just_test_1_1_1_0_p24_network()
         # speedtest_task_dict = self.tool_utils.read_json_file("20210406_Tue_142629.json")
         carefully_chosen_dict = speedtest_task_dict["result"]["carefully_chosen"]
         if int(carefully_chosen_dict["count"]) == 0:
             task_dict_major_var_dict["success"] = False
-            mess = my_func_name + ": " +\
-                "All test node are unavailable.Mission failed."
+            mess = my_func_name + ": " + \
+                   "All test node are unavailable.Mission failed."
             task_dict_major_var_dict["message"] += mess + "\n"
             self.diy_output(mess)
         else:
@@ -790,13 +791,13 @@ class cloudflare_cdn_speedtest:
             carefully_chosen_hosts_list = list(carefully_chosen_hosts_dict.keys())
             update_ip_address = carefully_chosen_hosts_list[0]
             task_dict_major_var_dict["update_ip_address"] = update_ip_address
-            mess = my_func_name + ": " + "Update DDNS to "+str(update_ip_address)
+            mess = my_func_name + ": " + "Update DDNS to " + str(update_ip_address)
             task_dict_major_var_dict["message"] += mess + "\n"
             self.diy_output(mess)
             curr_best_node_ip_address = carefully_chosen_hosts_list[0]
 
             if choose == "cf":
-                ddns_tools = cf_simple_ddns(specific_ip_address = curr_best_node_ip_address)
+                ddns_tools = cf_simple_ddns(specific_ip_address=curr_best_node_ip_address)
             else:
                 ddns_tools = dnspod_simple_ddns()
             res = ddns_tools.simple_update_ddns_domain_records(ipv4_address=curr_best_node_ip_address)
@@ -810,10 +811,10 @@ class cloudflare_cdn_speedtest:
                 mess = my_func_name + ": " + "DDNS update failed!"
             task_dict_major_var_dict["message"] += mess + "\n"
             self.diy_output(mess)
-        
+
         took_time = time.time() - start_time
         task_dict["task_detail"]["duration_in_sec"] = took_time
-        self.diy_output("Took {} seconds.".format("%.3f"%took_time) )
+        self.diy_output("Took {} seconds.".format("%.3f" % took_time))
 
         self.tool_utils.write_obj_to_json_file(
             filename=None,
@@ -830,7 +831,6 @@ class cloudflare_cdn_speedtest:
     #     res = ddns_tools.simple_update_ddns_domain_records(ipv4_address=ipv4_address)
     #     return ddns_tools.judge_simple_ddns_result(res, ipv4_address=ipv4_address)
 
-
     def main(self):
 
         # self.just_speedtest(str(self.network_address.next()))
@@ -838,7 +838,6 @@ class cloudflare_cdn_speedtest:
 
 
 if __name__ == "__main__":
-    
     # url = "https://speed.haoren.ml/cache.jpg"
     # # 128 MiB version
     # sha256_hash_value = "45A3AE1D8321E9C99A5AEEA31A2993CF1E384661326C3D238FFAFA2D7451AEDB"
@@ -863,10 +862,10 @@ if __name__ == "__main__":
     # specific_range = (0, 60 * my_const.ONE_BIN_MB -1)
     # sha256_hash_value = "CF5AC69CA412F9B3B1A8B8DE27D368C5C05ED4B1B6AA40E6C38D9CBF23711342"
 
-    url = "https://speed.cloudflare.com/__down?bytes=" + str(33 * my_const.ONE_BIN_MB -1)
+    url = "https://speed.cloudflare.com/__down?bytes=" + str(33 * my_const.ONE_BIN_MB - 1)
     ###### 32 MiB version   __down?bytes=x, x>=32.5MiB
     sha256_hash_value = "34DBA6984A6EF54058F32C1B36CB5F62198B9926E67881A504B0042389D7E9B8"
-    specific_range = (0, 32 * my_const.ONE_BIN_MB -1)
+    specific_range = (0, 32 * my_const.ONE_BIN_MB - 1)
 
     test = cloudflare_cdn_speedtest(
         url=url,
@@ -884,7 +883,3 @@ if __name__ == "__main__":
     #     wirte_to_file=True,
     #     violence_mode=False
     # )
-    
-
-    
-
