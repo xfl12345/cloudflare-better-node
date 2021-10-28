@@ -10,6 +10,9 @@ conf/
 no_upload/
 result/
 
+#JetBrain IDE code files
+.idea/
+
 # visual studio code files
 .vscode/
 
