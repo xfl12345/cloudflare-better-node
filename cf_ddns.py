@@ -16,12 +16,14 @@ curl -X GET "https://api.cloudflare.com/client/v4/zones/cd7d0123e3012345da9420df
      -H "X-Auth-Key:1234567893feefc5f0q5000bfo0c38d90bbeb" \
      -H "X-Auth-Email:example@example.com"
 
-The constant follow is necessary to be set correctly in file "conf/CloudflareCdnDdnsConf.py":
+The constant follow is necessary to be set correctly in file "conf/cloudflare_cdn_ddns_conf.json":
 # This is a example.
-zone_id="cd7d0123e3012345da9420df9514dad0"
-x_auth_email="example@example.com"
-x_auth_key="1234567893feefc5f0q5000bfo0c38d90bbeb"
-aim_subdomain = "diy_a_subdomain"
+{
+    "x_auth_email": "example@example.com",
+    "x_auth_key": "1234567893feefc5f0q5000bfo0c38d90bbeb",
+    "zone_id": "cd7d0123e3012345da9420df9514dad0",
+    "aim_subdomain": "diy_a_subdomain"
+}
 
 Q: What is "x_auth_key"? How to get "x_auth_key"?
 A: Well.Login to Cloudflare.Then open the URL: https://dash.cloudflare.com/profile/api-tokens
