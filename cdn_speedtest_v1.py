@@ -800,7 +800,7 @@ class cloudflare_cdn_speedtest:
                 ddns_tools = cf_simple_ddns(specific_ip_address=curr_best_node_ip_address)
             else:
                 ddns_tools = dnspod_simple_ddns()
-            res = ddns_tools.simple_update_ddns_domain_records(ipv4_address=curr_best_node_ip_address)
+            res = ddns_tools.simple_update_ddns_domain_A_records(ipv4_address=curr_best_node_ip_address)
             task_dict["response"] = res
             ddns_update_result = ddns_tools.judge_simple_ddns_result(res, curr_best_node_ip_address)
             if ddns_update_result:
@@ -822,14 +822,14 @@ class cloudflare_cdn_speedtest:
             obj=task_dict
         )
 
-    # def update_ddns(self, ipv4_address, choose="cf"):
+    # def update_ddns(self, ip_address, choose="cf"):
     #     ddns_tools = None
     #     if choose == "cf":
     #         ddns_tools = cf_simple_ddns()
     #     else:
     #         ddns_tools = dnspod_simple_ddns()
-    #     res = ddns_tools.simple_update_ddns_domain_records(ipv4_address=ipv4_address)
-    #     return ddns_tools.judge_simple_ddns_result(res, ipv4_address=ipv4_address)
+    #     res = ddns_tools.simple_update_ddns_domain_A_records(ip_address=ip_address)
+    #     return ddns_tools.judge_simple_ddns_result(res, ip_address=ip_address)
 
     def main(self):
 
