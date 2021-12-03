@@ -115,7 +115,7 @@ class cf_simple_ddns:
         url = self.cf_zones_dns_records_url + "?" + "type=" + the_type + "&" + "match=all"
         headers = self.get_cf_api_necessary_headers(url=url)
         res = self.forced_ip_request(url=url, headers=headers).text
-        print(res)
+        # print(res)
         return self.try_text2json(json_str=res)
 
     def forced_ip_request(self, url: str, headers, method: str = "get", payload=None) -> requests.Response:
