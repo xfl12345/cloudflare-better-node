@@ -44,13 +44,14 @@ class CloudflareCdnDdnsConf:
         # Global API Key
         self.x_auth_key = "*************************************"
         self.aim_subdomain = "the_sub_domain_you_want_to_update"
+        self.record_type = "A"
 
     def to_json_string(self):
         return json.dumps(self, cls=MyJSONEncoder, sort_keys=True, indent=4)
 
 
 class cf_simple_ddns:
-    def __init__(self, conf: CloudflareCdnDdnsConf = None, specific_ip_address: str = "1.0.0.0"):
+    def __init__(self, conf: CloudflareCdnDdnsConf = None, specific_ip_address: str = "1.0.0.222"):
         self.user_agent = my_const.USER_AGENT
         self.cf_conf = CloudflareCdnDdnsConf()
         # Read configuration from json file as default
@@ -110,6 +111,13 @@ class cf_simple_ddns:
         res = self.forced_ip_request(url=url, headers=headers).text
         return self.try_text2json(json_str=res)
 
+    def get_typed_dns_records(self, the_type: str = "A"):
+        url = self.cf_zones_dns_records_url + "?" + "type=" + the_type + "&" + "match=all"
+        headers = self.get_cf_api_necessary_headers(url=url)
+        res = self.forced_ip_request(url=url, headers=headers).text
+        print(res)
+        return self.try_text2json(json_str=res)
+
     def forced_ip_request(self, url: str, headers, method: str = "get", payload=None) -> requests.Response:
         session = requests.Session()
         session.mount(prefix="https://",
@@ -144,7 +152,7 @@ class cf_simple_ddns:
                 search_result = search_tool.get_dict_contain_value(self.cf_conf.zone_id)
                 self.second_level_domain = str(search_result[0]["obj"]["name"])
             self.ddns_domain = self.cf_conf.aim_subdomain + "." + self.second_level_domain
-        request_result = self.get_all_dns_records()
+        request_result = self.get_typed_dns_records(the_type=self.cf_conf.record_type)
         if is_request_failed(request_result):
             return None
         search_tool = json_tools.Find(request_result)
@@ -193,13 +201,7 @@ class cf_simple_ddns:
     def update_cache_domain_id(self):
         self.ddns_domain_id = self.get_ddns_domain_id()
 
-    def simple_update_ddns_domain_A_records(self, ipv4_address: str):
-        return self.simple_update_ddns_domain_ip_records(ip_address=ipv4_address, record_type="A")
-
-    def simple_update_ddns_domain_AAAA_records(self, ipv6_address: str):
-        return self.simple_update_ddns_domain_ip_records(ip_address=ipv6_address, record_type="AAAA")
-
-    def simple_update_ddns_domain_ip_records(self, ip_address: str, record_type: str):
+    def simple_update_ddns_domain_ip_records(self, ip_address: str):
         if self.ddns_domain_id is None:
             self.ddns_domain_id = self.get_ddns_domain_id()
             if self.ddns_domain_id is None:
@@ -207,7 +209,7 @@ class cf_simple_ddns:
         url = self.cf_zones_dns_records_url + "/" + self.ddns_domain_id
         headers = self.get_cf_api_necessary_headers(url=url)
         param = {
-            "type": record_type,
+            "type": self.cf_conf.record_type,
             "name": self.cf_conf.aim_subdomain,
             "content": ip_address,
             "ttl": 120,
@@ -228,22 +230,25 @@ class cf_simple_ddns:
 
 
 if __name__ == "__main__":
-    target_update_ip_address = "1.1.1.172"
+    target_update_ip_address = "1.0.0.0"
     test = cf_simple_ddns()
+    test.cf_conf.aim_subdomain = "test"
+    test.cf_conf.record_type = "A"
     test.update_cache_domain_id()
     print(test.ddns_domain_id)
-    res = test.simple_update_ddns_domain_A_records(ipv4_address=target_update_ip_address)
+    res = test.simple_update_ddns_domain_ip_records(ip_address=target_update_ip_address)
     print(res)
     print(test.judge_simple_ddns_result(request_result=res, ip_address=target_update_ip_address))
 
     target_update_ip_address = "240e::1"
     cf_conf = test.cf_conf
-    cf_conf.aim_subdomain = "test"
+    cf_conf.aim_subdomain = "test6"
+    cf_conf.record_type = "AAAA"
     test = cf_simple_ddns(cf_conf)
     test.update_cache_domain_id()
     print(test.ddns_domain_id)
-    res = test.simple_update_ddns_domain_AAAA_records(ipv6_address="240e::1")
+    res = test.simple_update_ddns_domain_ip_records(ip_address=target_update_ip_address)
     print(res)
-    print(test.judge_simple_ddns_result(request_result=res, ip_address="240e::1"))
+    print(test.judge_simple_ddns_result(request_result=res, ip_address=target_update_ip_address))
 
 
