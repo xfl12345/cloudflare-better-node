@@ -51,7 +51,7 @@ class CloudflareCdnDdnsConf:
 
 
 class cf_simple_ddns:
-    def __init__(self, conf: CloudflareCdnDdnsConf = None, specific_ip_address: str = "1.0.0.222"):
+    def __init__(self, conf: CloudflareCdnDdnsConf = None, specific_ip_address: str = None):
         self.user_agent = my_const.USER_AGENT
         self.cf_conf = CloudflareCdnDdnsConf()
         # Read configuration from json file as default
@@ -230,7 +230,7 @@ class cf_simple_ddns:
 
 
 if __name__ == "__main__":
-    target_update_ip_address = "1.0.0.0"
+    target_update_ip_address = "1.1.1.166"
     test = cf_simple_ddns()
     test.cf_conf.aim_subdomain = "test"
     test.cf_conf.record_type = "A"
